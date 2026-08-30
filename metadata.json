@@ -1,0 +1,8 @@
+{
+  "name": "Remix Download Master",
+  "description": "Native Android video and audio downloader powered by embedded yt-dlp, FFmpeg, and Jetpack Compose.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

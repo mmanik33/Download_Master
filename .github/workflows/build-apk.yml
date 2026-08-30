@@ -1,0 +1,192 @@
+name: Build & Release Download Master
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release APKs and AAB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew || true
+
+      - name: Set up Temurin Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify Java environment
+        run: |
+          echo "=== Java Environment Verification ==="
+          java -version
+          echo "JAVA_HOME: $JAVA_HOME"
+          
+          if [ -z "$JAVA_HOME" ]; then
+            echo "ERROR: JAVA_HOME is not set."
+            exit 1
+          fi
+          
+          JAVA_MAJOR=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | awk -F '.' '{print ($1 == "1" ? $2 : $1)}')
+          echo "Detected Java major version: $JAVA_MAJOR"
+          
+          if [ -z "$JAVA_MAJOR" ] || [ "$JAVA_MAJOR" -lt 17 ]; then
+            echo "ERROR: Java major version ($JAVA_MAJOR) is lower than required version 17."
+            exit 1
+          fi
+          echo "Java 17 verified successfully."
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Ensure signing keystore
+        run: |
+          echo "=== Checking Keystore for Signing ==="
+          if [ -f "./debug.keystore" ]; then
+            echo "debug.keystore already exists in repository root."
+          else
+            echo "Generating signing keystore..."
+            keytool -genkey -v \
+              -keystore ./debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Download Master,O=DownloadMaster,C=US" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+          
+          if [ ! -f "./debug.keystore" ]; then
+            echo "ERROR: debug.keystore does not exist."
+            exit 1
+          fi
+          echo "Signing keystore is ready."
+
+      - name: Build Universal Release APK
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
+        run: |
+          echo "=== Building Universal Release APK ==="
+          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+            cp .env.example .env
+          fi
+          gradle :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Build Google Play Release AAB
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
+        run: |
+          echo "=== Building Google Play Store AAB Bundle ==="
+          gradle :app:bundleRelease --stacktrace --no-daemon
+
+      - name: Verify and Package Release Assets
+        id: prepare_assets
+        run: |
+          echo "=== Verifying and Packaging Release Assets ==="
+          TEMP_ASSET_DIR="${{ runner.temp }}/release-assets"
+          mkdir -p "$TEMP_ASSET_DIR"
+          
+          APK_DIR="app/build/outputs/apk/release"
+          AAB_DIR="app/build/outputs/bundle/release"
+          
+          # Universal APK Verification
+          SRC_APK=$(find "$APK_DIR" -name "*.apk" -type f | head -n 1)
+          DEST_APK="$TEMP_ASSET_DIR/Download-Master-universal-release.apk"
+          
+          if [ -z "$SRC_APK" ] || [ ! -f "$SRC_APK" ] || [ ! -s "$SRC_APK" ]; then
+            echo "ERROR: Universal APK not found or empty in $APK_DIR!"
+            exit 1
+          fi
+          
+          cp "$SRC_APK" "$DEST_APK"
+          echo "✓ Verified Universal APK: Download-Master-universal-release.apk ($(du -h "$DEST_APK" | cut -f1))"
+          
+          # AAB Bundle Verification
+          SRC_AAB=$(find "$AAB_DIR" -name "*.aab" -type f | head -n 1)
+          DEST_AAB="$TEMP_ASSET_DIR/Download-Master-release.aab"
+          
+          if [ -z "$SRC_AAB" ] || [ ! -f "$SRC_AAB" ] || [ ! -s "$SRC_AAB" ]; then
+            echo "ERROR: Release AAB not found or empty in $AAB_DIR!"
+            exit 1
+          fi
+          
+          cp "$SRC_AAB" "$DEST_AAB"
+          echo "✓ Verified Google Play Bundle: Download-Master-release.aab ($(du -h "$DEST_AAB" | cut -f1))"
+          
+          echo "asset_dir=$TEMP_ASSET_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Release Assets to GitHub Releases
+        id: publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Publishing to GitHub Releases ==="
+          ASSET_DIR="${{ steps.prepare_assets.outputs.asset_dir }}"
+          
+          RELEASE_TAG="v1.0.0-build-${{ github.run_number }}"
+          RELEASE_TITLE="Download Master Release Build #${{ github.run_number }}"
+          
+          APK_SIZE=$(du -h "$ASSET_DIR/Download-Master-universal-release.apk" | cut -f1)
+          AAB_SIZE=$(du -h "$ASSET_DIR/Download-Master-release.aab" | cut -f1)
+          
+          RELEASE_NOTES="### Download Master Release Build #${{ github.run_number }}
+          
+          **Release Artifacts:**
+          
+          #### 📱 Universal Release APK (Direct Device Installation):
+          - **Universal APK:** \`Download-Master-universal-release.apk\` (~$APK_SIZE)
+            *(Optimized universal installation package containing full video & audio download capabilities for all Android smartphones and tablets)*
+          
+          #### 📦 Google Play Store Distribution:
+          - **Android App Bundle:** \`Download-Master-release.aab\` (~$AAB_SIZE)
+            *(Dynamic delivery bundle with automated on-device optimization for Google Play Store)*
+          
+          ---
+          - **Commit SHA:** \`${{ github.sha }}\`
+          - **Build:** GitHub Actions Run #${{ github.run_number }}"
+          
+          gh release create "$RELEASE_TAG" \
+            "$ASSET_DIR/Download-Master-universal-release.apk" \
+            "$ASSET_DIR/Download-Master-release.aab" \
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_NOTES" \
+            --target "${{ github.sha }}" \
+            --latest
+
+      - name: Report Build & Release Result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Build & Release Summary ==="
+          RELEASE_TAG="v1.0.0-build-${{ github.run_number }}"
+          RELEASE_TITLE="Download Master Release Build #${{ github.run_number }}"
+          
+          if [ "${{ steps.publish_release.outcome }}" = "success" ]; then
+            RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"
+            echo "Release URL: $RELEASE_URL"
+            
+            cat << EOF >> "$GITHUB_STEP_SUMMARY"
+          ## 🚀 Download Master Release Assets Published!
+          
+          - **GitHub Release:** [$RELEASE_TITLE]($RELEASE_URL)
+          
+          ### 📱 Available Downloads:
+          1. **\`Download-Master-universal-release.apk\`** — Universal installation APK for all Android devices.
+          2. **\`Download-Master-release.aab\`** — Android App Bundle for Google Play Store console upload.
+          EOF
+          fi
