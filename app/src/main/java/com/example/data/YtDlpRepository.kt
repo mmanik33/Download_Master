@@ -445,8 +445,9 @@ class YtDlpRepository(private val context: Context) {
                 }
                 
                 // Format output file template with quality indicator to prevent file collisions
-                val outputTemplate = "${downloadDir.absolutePath}/%(title).80B-%(id)s-[$qualityTag].%(ext)s"
+                val outputTemplate = "%(title).80B-%(id)s-[$qualityTag].%(ext)s"
                 request.addOption("-o", outputTemplate)
+                request.addOption("--paths", downloadDir.absolutePath)
                 request.addOption("--paths", "temp:${downloadDir.absolutePath}/temp_${processId}")
 
                 // General performance and integrity options
@@ -538,6 +539,8 @@ class YtDlpRepository(private val context: Context) {
                     onProgress(progress, etaInSeconds, line)
                 }
 
+                File(downloadDir, "temp_${processId}").deleteRecursively()
+
                 val filesAfter = downloadDir.listFiles() ?: emptyArray()
                 val newFile = filesAfter.filter { it.name !in filesBefore }
                     .maxByOrNull { it.lastModified() }
@@ -547,7 +550,6 @@ class YtDlpRepository(private val context: Context) {
 
                 if (newFile.exists()) {
                     scanMediaFile(newFile)
-                    verifyDownloadedMedia(newFile)
                 }
 
                 return@withContext Result.success(newFile)
