@@ -107,10 +107,8 @@ fun DownloadsScreen(
     var mediaTypeFilter by remember { mutableIntStateOf(0) } // 0: All, 1: Videos, 2: Audio
     var searchQuery by remember { mutableStateOf("") }
 
-    val isPaused by viewModel.isDownloadPaused.collectAsStateWithLifecycle()
-    val activeDownload by viewModel.activeDownload.collectAsStateWithLifecycle()
-    val isDownloading = activeDownload != null
-    val downloadingCount = if (isDownloading) 1 else 0
+    val activeDownloads by viewModel.activeDownloads.collectAsStateWithLifecycle()
+    val downloadingCount = activeDownloads.size
     val completedCount = historyItems.size
 
     var showCancelDownloadDialog by remember { mutableStateOf(false) }
@@ -146,117 +144,30 @@ fun DownloadsScreen(
         }
     }
 
-    // Confirmation Dialog for Active Download Cancellation
-    if (showCancelDownloadDialog) {
-        val activeTitle = activeDownload?.mediaInfo?.title ?: "Download"
-        AlertDialog(
-            onDismissRequest = { showCancelDownloadDialog = false },
-            containerColor = colors.surface,
-            title = {
-                Text(
-                    text = "Cancel Download?",
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-            },
-            text = {
-                Text(
-                    text = "Are you sure you want to cancel downloading \"$activeTitle\"? Any downloaded progress will be discarded.",
-                    color = colors.textSecondary,
-                    fontSize = 14.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.cancelDownload()
-                        showCancelDownloadDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
-                ) {
-                    Text("Yes, Cancel", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCancelDownloadDialog = false }) {
-                    Text("Keep Downloading", color = colors.primary, fontWeight = FontWeight.Medium)
-                }
-            }
-        )
-    }
-
-    // Confirmation Dialog for Deleting Completed Download
-        // File Info Dialog
-    fileInfoItem?.let { item ->
-        AlertDialog(
-            onDismissRequest = { fileInfoItem = null },
-            containerColor = colors.surface,
-            title = {
-                Text(text = "Media Information", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Title:", color = colors.textSecondary, fontSize = 12.sp)
-                    Text(item.title, color = colors.textPrimary, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Quality / Format:", color = colors.textSecondary, fontSize = 12.sp)
-                    Text(if (item.isAudioOnly) "Audio" else "Video", color = colors.textPrimary, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("File Size:", color = colors.textSecondary, fontSize = 12.sp)
-                    Text(item.fileSizeFormatted, color = colors.textPrimary, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("File Path:", color = colors.textSecondary, fontSize = 12.sp)
-                    Text(item.localFilePath, color = colors.textPrimary, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Downloaded On:", color = colors.textSecondary, fontSize = 12.sp)
-                    Text(java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(item.timestamp)), color = colors.textPrimary, fontSize = 14.sp)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { fileInfoItem = null }) {
-                    Text("Close", color = PrimaryPurple)
-                }
-            }
-        )
-    }
-
+    // Delete Single Item Dialog
     if (itemToDelete != null) {
-        val item = itemToDelete!!
         AlertDialog(
             onDismissRequest = { itemToDelete = null },
             containerColor = colors.surface,
             title = {
                 Text(
-                    text = "Delete File?",
-                    color = colors.textPrimary,
+                    text = "Delete Download?",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    color = colors.textPrimary
                 )
             },
             text = {
                 Text(
-                    text = "Delete \"${item.title}\" and remove the file from device storage?",
-                    color = colors.textSecondary,
-                    fontSize = 14.sp
+                    text = "Are you sure you want to remove '${itemToDelete?.title}' from history? The downloaded file will NOT be deleted from your device storage.",
+                    color = colors.textSecondary
                 )
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        try {
-                            val f = File(item.localFilePath)
-                            if (f.exists()) f.delete()
-                        } catch (e: Exception) {
-                            // ignore
-                        }
-                        viewModel.removeHistoryItem(item.id)
-                        itemToDelete = null
-                        Toast.makeText(context, "File deleted", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
-                ) {
-                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                TextButton(onClick = {
+                    itemToDelete?.let { viewModel.removeHistoryItem(it.id) }
+                    itemToDelete = null
+                }) {
+                    Text("Remove", color = Color(0xFFEF4444))
                 }
             },
             dismissButton = {
@@ -267,62 +178,31 @@ fun DownloadsScreen(
         )
     }
 
-    // Confirmation Dialog for Clearing All History
-        if (showDeleteSelectedDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteSelectedDialog = false },
-            containerColor = colors.surface,
-            title = {
-                Text(text = "Delete Selected?", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            },
-            text = {
-                Text(
-                    text = "Are you sure you want to delete ${selectedItems.size} items? The files will be removed from storage.",
-                    color = colors.textSecondary,
-                    fontSize = 14.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        selectedItems.forEach { id -> viewModel.removeHistoryItem(id) }
-                        selectedItems = emptySet()
-                        isSelectionMode = false
-                        showDeleteSelectedDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
-                ) {
-                    Text("Delete All", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteSelectedDialog = false }) {
-                    Text("Cancel", color = colors.textPrimary)
-                }
-            }
-        )
-    }
-
+    // Clear All History Dialog
     if (showClearAllDialog) {
         AlertDialog(
             onDismissRequest = { showClearAllDialog = false },
             containerColor = colors.surface,
             title = {
-                Text("Clear All Completed?", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(
+                    text = "Clear All History?",
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary
+                )
             },
             text = {
-                Text("Are you sure you want to clear all completed download records?", color = colors.textSecondary, fontSize = 14.sp)
+                Text(
+                    text = "Are you sure you want to clear all your download history? Your downloaded files will remain on your device.",
+                    color = colors.textSecondary
+                )
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.clearHistory()
-                        showClearAllDialog = false
-                        Toast.makeText(context, "History cleared", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
-                ) {
-                    Text("Clear All", color = Color.White, fontWeight = FontWeight.Bold)
+                TextButton(onClick = {
+                    viewModel.clearHistory()
+                    showClearAllDialog = false
+                    selectedTab = 0
+                }) {
+                    Text("Clear All", color = Color(0xFFEF4444))
                 }
             },
             dismissButton = {
@@ -333,61 +213,87 @@ fun DownloadsScreen(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .padding(top = 12.dp)
-    ) {
-        // Top Header with Clear All button if completed items exist
+    // Delete Selected Items Dialog
+    if (showDeleteSelectedDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelectedDialog = false },
+            containerColor = colors.surface,
+            title = {
+                Text(
+                    text = "Delete Selected?",
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to remove ${selectedItems.size} items from history? Files will not be deleted from storage.",
+                    color = colors.textSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedItems.forEach { viewModel.removeHistoryItem(it) }
+                    selectedItems = emptySet()
+                    isSelectionMode = false
+                    showDeleteSelectedDialog = false
+                }) {
+                    Text("Remove", color = Color(0xFFEF4444))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteSelectedDialog = false }) {
+                    Text("Cancel", color = colors.textSecondary)
+                }
+            }
+        )
+    }
+
+    // File Info Bottom Sheet / Dialog
+    if (fileInfoItem != null) {
+        AlertDialog(
+            onDismissRequest = { fileInfoItem = null },
+            containerColor = colors.surface,
+            title = { Text("Media Information", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Title: ${fileInfoItem?.title}", color = colors.textSecondary)
+                    Text("Format: ${if (fileInfoItem?.isAudioOnly == true) "Audio" else "Video"}", color = colors.textSecondary)
+                    Text("Size: ${fileInfoItem?.fileSizeFormatted}", color = colors.textSecondary)
+                    Text("Saved at: ${fileInfoItem?.localFilePath}", color = colors.textSecondary)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { fileInfoItem = null }) { Text("Close") }
+            }
+        )
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Top App Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isSelectionMode) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { 
+                    IconButton(onClick = {
                         isSelectionMode = false
                         selectedItems = emptySet()
                     }) {
-                        Icon(imageVector = androidx.compose.material.icons.Icons.Default.Close, contentDescription = "Cancel", tint = colors.textPrimary)
+                        Icon(imageVector = androidx.compose.material.icons.Icons.Default.Close, contentDescription = "Close Selection", tint = colors.textPrimary)
                     }
-                    Text(
-                        text = "${selectedItems.size} Selected",
-                        fontSize = 18.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                        color = colors.textPrimary
-                    )
+                    Text(text = "${selectedItems.size} Selected", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (selectedItems.isNotEmpty()) {
+                Row {
+                    if (selectedItems.size == 1) {
                         IconButton(onClick = {
-                            val itemsToShare = historyItems.filter { selectedItems.contains(it.id) }.map { it.localFilePath }
-                            if (itemsToShare.isNotEmpty()) {
-                                try {
-                                    val uris = itemsToShare.mapNotNull { filePath ->
-                                        val file = java.io.File(filePath)
-                                        if (file.exists()) {
-                                            androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                                        } else null
-                                    }
-                                    if (uris.isNotEmpty()) {
-                                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-                                            type = "*/*"
-                                            putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, java.util.ArrayList(uris))
-                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        }
-                                        context.startActivity(android.content.Intent.createChooser(intent, "Share media via"))
-                                    } else {
-                                        android.widget.Toast.makeText(context, "Files do not exist", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                } catch (e: Exception) {
-                                    android.widget.Toast.makeText(context, "Share error: ${e.localizedMessage}", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            val id = selectedItems.first()
+                            val item = historyItems.find { it.id == id }
+                            item?.let { shareMediaFile(context, it.localFilePath) }
                         }) {
                             Icon(imageVector = androidx.compose.material.icons.Icons.Default.Share, contentDescription = "Share Selected", tint = PrimaryPurple)
                         }
@@ -543,27 +449,28 @@ fun DownloadsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 1. Active Downloading Card (shown in All or Downloading tabs)
-            activeDownload?.let { downloadingState ->
-                if (selectedTab == 0 || selectedTab == 1) {
-                    item(key = "active_download_item") {
-                        ActiveDownloadCard(
-                            title = downloadingState.mediaInfo.title,
-                            thumbnailUrl = downloadingState.mediaInfo.thumbnailUrl,
-                            qualityTag = if (downloadingState.config.isAudioOnly) downloadingState.config.audioFormat.name else downloadingState.config.videoQuality.label,
-                            progressPercent = downloadingState.progress.progressPercent.toInt(),
-                            progressText = if (isPaused) "Paused • Tap play to resume" else downloadingState.progress.lineText.ifBlank { "${downloadingState.progress.progressPercent.toInt()}%" },
-                            speedText = if (isPaused) "Paused" else downloadingState.progress.speedText,
-                            stageText = if (isPaused) "PAUSED" else downloadingState.progress.stage.name,
-                            isPaused = isPaused,
-                            onPauseResume = { viewModel.togglePauseResumeDownload() },
-                            onCancel = { showCancelDownloadDialog = true }
-                        )
-                    }
+            if (selectedTab == 0 || selectedTab == 1) {
+                items(activeDownloads.values.toList(), key = { it.processId }) { downloadingState ->
+                    ActiveDownloadCard(
+                        title = downloadingState.mediaInfo.title,
+                        thumbnailUrl = downloadingState.mediaInfo.thumbnailUrl,
+                        qualityTag = if (downloadingState.config.isAudioOnly) downloadingState.config.audioFormat.name else downloadingState.config.videoQuality.label,
+                        progressPercent = downloadingState.progress.progressPercent.toInt(),
+                        progressText = if (downloadingState.isPaused) "Paused • Tap play to resume" else downloadingState.progress.lineText.ifBlank { "${downloadingState.progress.progressPercent.toInt()}%" },
+                        speedText = if (downloadingState.isPaused) "Paused" else downloadingState.progress.speedText,
+                        stageText = if (downloadingState.isPaused) "PAUSED" else downloadingState.progress.stage.name,
+                        isPaused = downloadingState.isPaused,
+                        onPauseResume = { viewModel.togglePauseResumeDownload(downloadingState.processId) },
+                        onCancel = { 
+                            // Quick way to cancel without dialog for multi-downloads, or use dialog but track ID
+                            viewModel.cancelDownload(downloadingState.processId) 
+                        }
+                    )
                 }
             }
 
             // 2. Downloading Tab Empty State
-            if (selectedTab == 1 && !isDownloading) {
+            if (selectedTab == 1 && !activeDownloads.isNotEmpty()) {
                 item {
                     EmptyDownloadsView(message = "No active downloads currently in progress")
                 }
@@ -572,7 +479,7 @@ fun DownloadsScreen(
             // 3. Completed Download Cards (shown in All or Completed tabs)
             if (selectedTab == 0 || selectedTab == 2) {
                 if (filteredHistoryItems.isEmpty()) {
-                    if (historyItems.isEmpty() && (!isDownloading || selectedTab == 2)) {
+                    if (historyItems.isEmpty() && (!activeDownloads.isNotEmpty() || selectedTab == 2)) {
                         item {
                             EmptyDownloadsView(message = "No completed downloads yet. Paste a link to start downloading!")
                         }

@@ -36,6 +36,14 @@ enum class MainTab(val title: String) {
     SETTINGS("Settings")
 }
 
+data class ActiveDownloadData(
+    val processId: String,
+    val config: com.example.model.DownloadConfig,
+    val mediaInfo: com.example.model.MediaModel,
+    val progress: com.example.model.DownloadProgress,
+    val isPaused: Boolean = false
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = YtDlpRepository(application)
@@ -103,9 +111,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val customArguments = MutableStateFlow("")
 
     // Active & Completed Downloads Tracking
-    val activeDownload = kotlinx.coroutines.flow.MutableStateFlow<com.example.ui.state.DownloadUiState.Downloading?>(null)
-    val activeDownloadsCount = MutableStateFlow(0)
-    val isDownloadPaused = MutableStateFlow(false)
+    val activeDownloads = kotlinx.coroutines.flow.MutableStateFlow<Map<String, ActiveDownloadData>>(emptyMap())
+    // removed count
+    // removed paused
 
     // Download History
     private val _downloadHistory = MutableStateFlow<List<DownloadHistoryItem>>(emptyList())
@@ -133,68 +141,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observeServiceEvents() {
         viewModelScope.launch {
-            DownloadForegroundService.isPaused.collect { paused ->
-                isDownloadPaused.value = paused
-            }
-        }
-
-        viewModelScope.launch {
             DownloadForegroundService.downloadEvents.collect { event ->
                 when (event) {
                     is DownloadForegroundService.DownloadEvent.Started -> {
-                        activeDownloadsCount.value = 1
-                        isDownloadPaused.value = false
-                        val currentState = _uiState.value
-                        if (currentState is DownloadUiState.Ready) {
-                            _uiState.value = DownloadUiState.Downloading(
-                                mediaInfo = currentState.mediaInfo,
-                                config = currentState.config,
-                                progress = DownloadProgress(stage = DownloadStage.INITIALIZING)
+                        val mediaInfo = (uiState.value as? DownloadUiState.Ready)?.mediaInfo ?: (uiState.value as? DownloadUiState.Downloading)?.mediaInfo
+                        if (mediaInfo != null) {
+                            val newData = ActiveDownloadData(
+                                processId = event.id,
+                                config = event.config,
+                                mediaInfo = mediaInfo,
+                                progress = com.example.model.DownloadProgress(stage = com.example.model.DownloadStage.INITIALIZING)
                             )
+                            activeDownloads.value = activeDownloads.value + (event.id to newData)
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Progress -> {
-                        val currentActive = activeDownload.value
-                        if (currentActive != null) {
-                            val updated = currentActive.copy(progress = event.progress)
-                            activeDownload.value = updated
-                            if (_uiState.value is DownloadUiState.Downloading) {
-                                _uiState.value = updated
-                            }
-                            isDownloadPaused.value = event.progress.isPaused || event.progress.stage == DownloadStage.PAUSED
+                        val current = activeDownloads.value[event.id]
+                        if (current != null) {
+                            activeDownloads.value = activeDownloads.value + (event.id to current.copy(progress = event.progress, isPaused = event.isPaused))
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Completed -> {
-                        activeDownloadsCount.value = 0
-                        isDownloadPaused.value = false
-                        val currentActive = activeDownload.value
-                        if (currentActive != null) {
-                            if (_uiState.value is DownloadUiState.Downloading) {
-                                _uiState.value = DownloadUiState.Success(
-                                    mediaInfo = currentActive.mediaInfo,
-                                    downloadedFile = event.file
-                                )
-                            }
-                            addHistoryItem(currentActive.mediaInfo, event.file, currentActive.config.isAudioOnly)
+                        val current = activeDownloads.value[event.id]
+                        if (current != null) {
+                            addHistoryItem(current.mediaInfo, event.file, current.config.isAudioOnly)
+                            activeDownloads.value = activeDownloads.value - event.id
                         }
-                        activeDownload.value = null
-                    }
-                    is DownloadForegroundService.DownloadEvent.Failed -> {
-                        activeDownloadsCount.value = 0
-                        isDownloadPaused.value = false
-                        val url = activeDownload.value?.config?.url
-                        if (_uiState.value is DownloadUiState.Downloading) {
-                            _uiState.value = DownloadUiState.Error(event.error, url)
-                        }
-                        activeDownload.value = null
-                    }
-                    is DownloadForegroundService.DownloadEvent.Cancelled -> {
-                        activeDownloadsCount.value = 0
-                        isDownloadPaused.value = false
-                        if (_uiState.value is DownloadUiState.Downloading) {
+                        if (activeDownloads.value.isEmpty()) {
                             _uiState.value = DownloadUiState.Idle
                         }
-                        activeDownload.value = null
+                    }
+                    is DownloadForegroundService.DownloadEvent.Failed -> {
+                        activeDownloads.value = activeDownloads.value - event.id
+                        if (activeDownloads.value.isEmpty()) {
+                            _uiState.value = DownloadUiState.Error(event.error)
+                        }
+                    }
+                    is DownloadForegroundService.DownloadEvent.Cancelled -> {
+                        activeDownloads.value = activeDownloads.value - event.id
+                        if (activeDownloads.value.isEmpty()) {
+                            _uiState.value = DownloadUiState.Idle
+                        }
                     }
                 }
             }
@@ -258,8 +245,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         audioOnly: Boolean,
         formatId: String? = null
     ) {
-        if (activeDownload.value != null && activeDownloadsCount.value > 0) {
-            android.widget.Toast.makeText(getApplication(), "A download is already in progress. Please wait for it to finish.", android.widget.Toast.LENGTH_SHORT).show()
+        if (activeDownloads.value.size >= maxConcurrentDownloads.value) {
+            android.widget.Toast.makeText(getApplication(), "Maximum concurrent downloads reached (${maxConcurrentDownloads.value}). Please wait.", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -274,20 +261,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             progress = DownloadProgress(stage = DownloadStage.INITIALIZING)
         )
         _uiState.value = downloadingState
-        activeDownload.value = downloadingState
+        
 
-        activeDownloadsCount.value = 1
+        
         DownloadForegroundService.startDownload(getApplication(), config)
     }
 
-    fun togglePauseResumeDownload() {
-        DownloadForegroundService.togglePauseResume(getApplication())
+    fun togglePauseResumeDownload(processId: String) {
+        DownloadForegroundService.togglePauseResume(getApplication(), processId)
     }
 
-    fun cancelDownload() {
-        DownloadForegroundService.cancelDownload(getApplication())
-        activeDownloadsCount.value = 0
-        _uiState.value = DownloadUiState.Idle
+    fun cancelDownload(processId: String) {
+        DownloadForegroundService.cancelDownload(getApplication(), processId)
     }
 
     fun resetToIdle() {

@@ -1,4 +1,6 @@
-package com.example.service
+import os
+
+content = """package com.example.service
 
 import android.app.Notification
 import android.app.NotificationManager
@@ -18,7 +20,7 @@ import com.example.model.DownloadConfig
 import com.example.model.DownloadProgress
 import com.example.model.DownloadStage
 import com.example.model.VideoQuality
-import com.example.MainActivity
+import com.example.ui.MainActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.File
@@ -231,7 +233,7 @@ class DownloadForegroundService : Service() {
                     "--:--"
                 }
 
-                val speedMatch = Regex("""\\bat\\s+([0-9.]+\\s*[KMGT]?i?B/s)""").find(line)
+                val speedMatch = Regex(\"\"\"\\\\bat\\\\s+([0-9.]+\\\\s*[KMGT]?i?B/s)\"\"\").find(line)
                 val speedStr = speedMatch?.groupValues?.get(1) ?: if (progressPercent > 0) "Downloading" else "Connecting..."
 
                 val stage = when {
@@ -395,3 +397,7 @@ class DownloadForegroundService : Service() {
         activeJobs.clear()
     }
 }
+"""
+
+with open('app/src/main/java/com/example/service/DownloadForegroundService.kt', 'w') as f:
+    f.write(content)
