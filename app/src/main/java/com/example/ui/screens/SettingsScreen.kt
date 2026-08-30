@@ -120,8 +120,8 @@ fun SettingsScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF141A20)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                colors = CardDefaults.cardColors(containerColor = if (colors.isDark) Color(0xFF141A20) else colors.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = if (colors.isDark) 0.dp else 4.dp)
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth()
@@ -132,7 +132,7 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .background(
                                 Brush.verticalGradient(
-                                    colors = listOf(colors.primary.copy(alpha = 0.6f), Color.Transparent),
+                                    colors = listOf(colors.primary.copy(alpha = if (colors.isDark) 0.6f else 0.3f), Color.Transparent),
                                     startY = 0f,
                                     endY = 500f
                                 )
@@ -159,7 +159,7 @@ fun SettingsScreen(
                                     modifier = Modifier
                                         .size(64.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF1B242C))
+                                        .background(if (colors.isDark) Color(0xFF1B242C) else colors.surface)
                                         .border(2.dp, colors.primary.copy(alpha = 0.8f), CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -180,7 +180,7 @@ fun SettingsScreen(
                                     text = "M. M. Anik", 
                                     fontSize = 24.sp, 
                                     fontWeight = FontWeight.ExtraBold, 
-                                    color = Color.White
+                                    color = if (colors.isDark) Color.White else colors.textPrimary
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 androidx.compose.material3.Icon(
@@ -197,7 +197,7 @@ fun SettingsScreen(
                             Text(
                                 text = "UX/UI Designer & Developer", 
                                 fontSize = 14.sp, 
-                                color = Color.White.copy(alpha = 0.6f), 
+                                color = if (colors.isDark) Color.White.copy(alpha = 0.6f) else colors.textSecondary, 
                                 fontWeight = FontWeight.Medium
                             )
                             
@@ -236,8 +236,8 @@ fun SettingsScreen(
                                 modifier = modifier
                                     .clip(RoundedCornerShape(14.dp))
                                     .clickable { uriHandler.openUri(url) },
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B242C)),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                                colors = CardDefaults.cardColors(containerColor = if (colors.isDark) Color(0xFF1B242C) else colors.surfaceVariant),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (colors.isDark) Color.White.copy(alpha = 0.05f) else colors.textSecondary.copy(alpha = 0.1f))
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().height(64.dp),
@@ -282,13 +282,13 @@ fun SettingsScreen(
                                             text = title, 
                                             fontSize = 14.sp, 
                                             fontWeight = FontWeight.SemiBold, 
-                                            color = Color.White
+                                            color = if (colors.isDark) Color.White else colors.textPrimary
                                         )
                                         Spacer(modifier = Modifier.height(1.dp))
                                         Text(
                                             text = subtitle, 
                                             fontSize = 10.sp, 
-                                            color = Color.White.copy(alpha = 0.5f), 
+                                            color = if (colors.isDark) Color.White.copy(alpha = 0.5f) else colors.textSecondary.copy(alpha = 0.8f), 
                                             maxLines = 1, 
                                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                         )
@@ -298,7 +298,7 @@ fun SettingsScreen(
                                     androidx.compose.material3.Icon(
                                         androidx.compose.material.icons.Icons.Default.OpenInNew,
                                         contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.4f),
+                                        tint = if (colors.isDark) Color.White.copy(alpha = 0.4f) else colors.textSecondary.copy(alpha = 0.5f),
                                         modifier = Modifier.size(16.dp)
                                     )
                                     
