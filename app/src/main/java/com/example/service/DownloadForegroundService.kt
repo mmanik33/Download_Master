@@ -73,6 +73,7 @@ class DownloadForegroundService : Service() {
         val downloadEvents: SharedFlow<DownloadEvent> = _downloadEvents.asSharedFlow()
 
         private var activeProcessId: String = "dm_download_task"
+        var activeConfig: DownloadConfig? = null
         private var activeTitle: String = "Media Download"
 
         fun startDownload(context: Context, config: DownloadConfig) {
@@ -198,7 +199,7 @@ class DownloadForegroundService : Service() {
     private fun handlePause() {
         Log.i(TAG, "Pausing active download process: $activeProcessId")
         _isPaused.value = true
-        repository.setPaused(activeProcessId, true)
+        repository.cancelDownload(activeProcessId)
         val cur = _currentProgress.value
         val pausedProgress = (cur ?: DownloadProgress()).copy(
             speedText = "Paused",
@@ -213,7 +214,6 @@ class DownloadForegroundService : Service() {
     private fun handleResume() {
         Log.i(TAG, "Resuming active download process: $activeProcessId")
         _isPaused.value = false
-        repository.setPaused(activeProcessId, false)
         val cur = _currentProgress.value
         val resumedProgress = (cur ?: DownloadProgress()).copy(
             speedText = "Resuming...",
@@ -223,9 +223,11 @@ class DownloadForegroundService : Service() {
         _currentProgress.value = resumedProgress
         serviceScope.launch { _downloadEvents.emit(DownloadEvent.Progress(resumedProgress)) }
         updateProgressNotification(activeTitle, resumedProgress.progressPercent, "Resuming...", resumedProgress.etaText, isPaused = false)
+        activeConfig?.let { performDownload(it, isResume = true) }
     }
 
-    private fun performDownload(config: DownloadConfig) {
+    private fun performDownload(config: DownloadConfig, isResume: Boolean = false) {
+        activeConfig = config
         downloadJob?.cancel()
         activeProcessId = "dl_${System.currentTimeMillis()}"
 
@@ -306,19 +308,23 @@ class DownloadForegroundService : Service() {
                     stopSelf()
                 },
                 onFailure = { error ->
-                    Log.e(TAG, "Download failed", error)
-                    _currentProgress.value = DownloadProgress(
-                        progressPercent = 0f,
-                        speedText = "Error",
-                        etaText = "--:--",
-                        lineText = error.localizedMessage ?: "Download failed",
-                        stage = DownloadStage.FAILED
-                    )
-                    _downloadEvents.emit(DownloadEvent.Failed(error.localizedMessage ?: "Unknown error"))
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    notificationManager.cancel(NOTIFICATION_ID)
-                    showFailureNotification(config.title, error.localizedMessage ?: "Download failed")
-                    stopSelf()
+                    if (_isPaused.value) {
+                        Log.i(TAG, "Download paused intentionally, ignoring failure.")
+                    } else {
+                        Log.e(TAG, "Download failed", error)
+                        _currentProgress.value = DownloadProgress(
+                            progressPercent = 0f,
+                            speedText = "Error",
+                            etaText = "--:--",
+                            lineText = error.localizedMessage ?: "Download failed",
+                            stage = DownloadStage.FAILED
+                        )
+                        _downloadEvents.emit(DownloadEvent.Failed(error.localizedMessage ?: "Unknown error"))
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        notificationManager.cancel(NOTIFICATION_ID)
+                        showFailureNotification(config.title, error.localizedMessage ?: "Download failed")
+                        stopSelf()
+                    }
                 }
             )
         }

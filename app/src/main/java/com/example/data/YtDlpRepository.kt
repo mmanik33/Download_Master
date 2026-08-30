@@ -115,6 +115,8 @@ class YtDlpRepository(private val context: Context) {
                 request.addOption("--no-call-home")
                 request.addOption("--socket-timeout", "7")
                 request.addOption("--extractor-retries", "1")
+                request.addOption("--flat-playlist")
+                request.addOption("--compat-options", "no-youtube-unavailable-videos")
 
                 if (cookiesFile != null && cookiesFile.exists() && cookiesFile.length() > 0) {
                     request.addOption("--cookies", cookiesFile.absolutePath)

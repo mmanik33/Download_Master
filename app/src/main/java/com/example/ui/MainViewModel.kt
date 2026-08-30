@@ -258,6 +258,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         audioOnly: Boolean,
         formatId: String? = null
     ) {
+        if (activeDownload.value != null && activeDownloadsCount.value > 0) {
+            android.widget.Toast.makeText(getApplication(), "A download is already in progress. Please wait for it to finish.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
         isAudioOnly.value = audioOnly
         selectedVideoQuality.value = quality
         selectedFormatId.value = formatId
