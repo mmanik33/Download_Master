@@ -447,6 +447,7 @@ class YtDlpRepository(private val context: Context) {
                 // Format output file template with quality indicator to prevent file collisions
                 val outputTemplate = "${downloadDir.absolutePath}/%(title).80B-%(id)s-[$qualityTag].%(ext)s"
                 request.addOption("-o", outputTemplate)
+                request.addOption("--paths", "temp:${downloadDir.absolutePath}/temp_${processId}")
 
                 // General performance and integrity options
                 request.addOption("--continue")
@@ -456,6 +457,8 @@ class YtDlpRepository(private val context: Context) {
                 request.addOption("--geo-bypass")
                 request.addOption("--retries", "10")
                 request.addOption("--fragment-retries", "10")
+                request.addOption("--concurrent-fragments", "4")
+                request.addOption("--hls-prefer-native")
 
                 // Format sorting and resolution prioritization (Seal algorithm)
                 val targetHeight = resolveTargetHeight(config)
@@ -507,7 +510,9 @@ class YtDlpRepository(private val context: Context) {
                 }
 
                 // High-speed Aria2c multi-threaded downloader (for supported direct platforms)
-                if (config.useAria2c && !isYouTube) {
+                val isFacebook = config.url.contains("facebook.com", true) || config.url.contains("fb.watch", true) || config.url.contains("fb.com", true)
+                val isSocialMedia = isFacebook || config.url.contains("instagram", true) || config.url.contains("tiktok", true) || config.url.contains("twitter", true) || config.url.contains("x.com", true)
+                if (config.useAria2c && !isYouTube && !isSocialMedia) {
                     try {
                         request.addOption("--external-downloader", "aria2c")
                         request.addOption("--external-downloader-args", "aria2c:-s 8 -x 8 -k 1M -j 8")

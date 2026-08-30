@@ -104,7 +104,8 @@ fun DownloadsScreen(
     var searchQuery by remember { mutableStateOf("") }
 
     val isPaused by viewModel.isDownloadPaused.collectAsStateWithLifecycle()
-    val isDownloading = uiState is DownloadUiState.Downloading
+    val activeDownload by viewModel.activeDownload.collectAsStateWithLifecycle()
+    val isDownloading = activeDownload != null
     val downloadingCount = if (isDownloading) 1 else 0
     val completedCount = historyItems.size
 
@@ -135,7 +136,7 @@ fun DownloadsScreen(
 
     // Confirmation Dialog for Active Download Cancellation
     if (showCancelDownloadDialog) {
-        val activeTitle = (uiState as? DownloadUiState.Downloading)?.mediaInfo?.title ?: "Download"
+        val activeTitle = activeDownload?.mediaInfo?.title ?: "Download"
         AlertDialog(
             onDismissRequest = { showCancelDownloadDialog = false },
             containerColor = colors.surface,
@@ -401,7 +402,7 @@ fun DownloadsScreen(
         ) {
             // 1. Active Downloading Card (shown in All or Downloading tabs)
             if (isDownloading && (selectedTab == 0 || selectedTab == 1)) {
-                val downloadingState = uiState as DownloadUiState.Downloading
+                val downloadingState = activeDownload!!
                 item(key = "active_download_item") {
                     ActiveDownloadCard(
                         title = downloadingState.mediaInfo.title,

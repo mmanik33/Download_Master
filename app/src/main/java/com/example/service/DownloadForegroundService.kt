@@ -61,6 +61,8 @@ class DownloadForegroundService : Service() {
         const val EXTRA_CUSTOM_ARGS = "extra_custom_args"
 
         // State flows to communicate with UI
+        private val _activeDownload = MutableStateFlow<com.example.model.ActiveDownload?>(null)
+        val activeDownload: StateFlow<com.example.model.ActiveDownload?> = _activeDownload.asStateFlow()
         private val _currentProgress = MutableStateFlow<DownloadProgress?>(null)
         val currentProgress: StateFlow<DownloadProgress?> = _currentProgress.asStateFlow()
 

@@ -103,6 +103,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val customArguments = MutableStateFlow("")
 
     // Active & Completed Downloads Tracking
+    val activeDownload = kotlinx.coroutines.flow.MutableStateFlow<com.example.ui.state.DownloadUiState.Downloading?>(null)
     val activeDownloadsCount = MutableStateFlow(0)
     val isDownloadPaused = MutableStateFlow(false)
 
@@ -153,35 +154,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Progress -> {
-                        val currentState = _uiState.value
-                        if (currentState is DownloadUiState.Downloading) {
-                            _uiState.value = currentState.copy(progress = event.progress)
+                        val currentActive = activeDownload.value
+                        if (currentActive != null) {
+                            val updated = currentActive.copy(progress = event.progress)
+                            activeDownload.value = updated
+                            if (_uiState.value is DownloadUiState.Downloading) {
+                                _uiState.value = updated
+                            }
                             isDownloadPaused.value = event.progress.isPaused || event.progress.stage == DownloadStage.PAUSED
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Completed -> {
                         activeDownloadsCount.value = 0
                         isDownloadPaused.value = false
-                        val currentState = _uiState.value
-                        if (currentState is DownloadUiState.Downloading) {
-                            _uiState.value = DownloadUiState.Success(
-                                mediaInfo = currentState.mediaInfo,
-                                downloadedFile = event.file
-                            )
-                            addHistoryItem(currentState.mediaInfo, event.file, currentState.config.isAudioOnly)
+                        val currentActive = activeDownload.value
+                        if (currentActive != null) {
+                            if (_uiState.value is DownloadUiState.Downloading) {
+                                _uiState.value = DownloadUiState.Success(
+                                    mediaInfo = currentActive.mediaInfo,
+                                    downloadedFile = event.file
+                                )
+                            }
+                            addHistoryItem(currentActive.mediaInfo, event.file, currentActive.config.isAudioOnly)
                         }
+                        activeDownload.value = null
                     }
                     is DownloadForegroundService.DownloadEvent.Failed -> {
                         activeDownloadsCount.value = 0
                         isDownloadPaused.value = false
-                        val currentState = _uiState.value
-                        val url = if (currentState is DownloadUiState.Downloading) currentState.config.url else null
-                        _uiState.value = DownloadUiState.Error(event.error, url)
+                        val url = activeDownload.value?.config?.url
+                        if (_uiState.value is DownloadUiState.Downloading) {
+                            _uiState.value = DownloadUiState.Error(event.error, url)
+                        }
+                        activeDownload.value = null
                     }
                     is DownloadForegroundService.DownloadEvent.Cancelled -> {
                         activeDownloadsCount.value = 0
                         isDownloadPaused.value = false
-                        _uiState.value = DownloadUiState.Idle
+                        if (_uiState.value is DownloadUiState.Downloading) {
+                            _uiState.value = DownloadUiState.Idle
+                        }
+                        activeDownload.value = null
                     }
                 }
             }
@@ -250,11 +263,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selectedFormatId.value = formatId
 
         val config = buildCurrentConfig(media.title, media.webpageUrl)
-        _uiState.value = DownloadUiState.Downloading(
+        val downloadingState = DownloadUiState.Downloading(
             mediaInfo = media,
             config = config,
             progress = DownloadProgress(stage = DownloadStage.INITIALIZING)
         )
+        _uiState.value = downloadingState
+        activeDownload.value = downloadingState
+
         activeDownloadsCount.value = 1
         DownloadForegroundService.startDownload(getApplication(), config)
     }
