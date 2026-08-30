@@ -366,63 +366,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // "How to Download?" Guide Banner Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .clickable { showHowToGuide = true },
-            colors = CardDefaults.cardColors(containerColor = colors.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = if (colors.isDark) 0.dp else 2.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(colors.primary.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Bolt,
-                        contentDescription = null,
-                        tint = colors.primary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "How to Download?",
-                        color = colors.textPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Quick 4-step interactive guide for any site",
-                        color = colors.textSecondary,
-                        fontSize = 12.sp
-                    )
-                }
-
-                Text(
-                    text = "Guide >",
-                    color = colors.secondary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
+        
 
         // 4 Core Highlights / Badges (Simplified user-friendly wording)
         Row(
@@ -437,8 +381,8 @@ fun HomeScreen(
             )
             FeatureHighlightCard(
                 icon = Icons.Default.HighQuality,
-                title = "4K / 1080p / MP3",
-                subtitle = "Choose any quality",
+                title = "8K / 4K / 1080p",
+                subtitle = "Choose any quality & MP3",
                 modifier = Modifier.weight(1f)
             )
         }

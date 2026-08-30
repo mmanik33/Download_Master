@@ -114,6 +114,7 @@ fun DownloadsScreen(
     val completedCount = historyItems.size
 
     var showCancelDownloadDialog by remember { mutableStateOf(false) }
+    var cancelProcessId by remember { mutableStateOf<String?>(null) }
     var itemToDelete by remember { mutableStateOf<DownloadHistoryItem?>(null) }
         var showClearAllDialog by remember { mutableStateOf(false) }
 
@@ -169,9 +170,9 @@ fun DownloadsScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    itemToDelete?.id?.let { viewModel.cancelDownload(it) } // using itemToDelete for holding active processId temporarily
+                    cancelProcessId?.let { viewModel.cancelDownload(it) }
                     showCancelDownloadDialog = false
-                    itemToDelete = null
+                    cancelProcessId = null
                 }) {
                     Text("Yes, Cancel", color = Color(0xFFEF4444))
                 }
@@ -179,7 +180,7 @@ fun DownloadsScreen(
             dismissButton = {
                 TextButton(onClick = { 
                     showCancelDownloadDialog = false 
-                    itemToDelete = null
+                    cancelProcessId = null
                 }) {
                     Text("No", color = colors.textSecondary)
                 }
@@ -502,8 +503,7 @@ fun DownloadsScreen(
                         isPaused = downloadingState.isPaused,
                         onPauseResume = { viewModel.togglePauseResumeDownload(downloadingState.processId) },
                         onCancel = { 
-                            // Use dummy history item just to hold processId for the dialog
-                            itemToDelete = DownloadHistoryItem(id = downloadingState.processId, title = "", webpageUrl = "", localFilePath = "", fileSizeFormatted = "", isAudioOnly = false)
+                            cancelProcessId = downloadingState.processId
                             showCancelDownloadDialog = true
                         }
                     )
@@ -543,6 +543,8 @@ fun DownloadsScreen(
                                 }
                                 if (selectedItems.isEmpty()) {
                                     isSelectionMode = false
+                                } else {
+                                    isSelectionMode = true
                                 }
                             },
                             onPlay = { openMediaFile(context, item.localFilePath, item.isAudioOnly) },
@@ -775,7 +777,10 @@ private fun CompletedDownloadCard(
             .border(if (isSelected) 2.dp else 0.dp, if (isSelected) PrimaryPurple else Color.Transparent, RoundedCornerShape(16.dp))
             .combinedClickable(
                 onClick = { if (isSelectionMode) onSelectToggle() else onPlay() },
-                onLongClick = { onSelectToggle() }
+                onLongClick = { 
+                    // When long clicked, always force selection mode and select this item
+                    onSelectToggle() 
+                }
             ),
         colors = CardDefaults.cardColors(containerColor = if (isSelected) PrimaryPurple.copy(alpha = 0.1f) else colors.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = if (colors.isDark) 0.dp else 2.dp)

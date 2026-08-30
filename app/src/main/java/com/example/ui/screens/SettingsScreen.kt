@@ -23,6 +23,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.BusinessCenter
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Folder
@@ -30,6 +38,7 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Security
@@ -68,6 +77,7 @@ import com.example.ui.components.AboutDialog
 import com.example.ui.components.DayNightToggleSwitch
 import com.example.ui.components.PrivacyPolicyDialog
 import com.example.ui.theme.AppTheme
+import com.example.ui.theme.PrimaryPurple
 import com.example.ui.theme.ColorThemePreset
 
 @Composable
@@ -85,6 +95,7 @@ fun SettingsScreen(
     onCheckEngineUpdate: () -> Unit
 ) {
     val context = LocalContext.current
+    var showDeveloperInfoDialog by remember { mutableStateOf(false) }
     val colors = AppTheme.colors
     val themeMode by viewModel.themeMode.collectAsState()
     val colorPalette by viewModel.colorPalette.collectAsState()
@@ -99,6 +110,138 @@ fun SettingsScreen(
     }
     if (showPrivacyDialog) {
         PrivacyPolicyDialog(onDismiss = { showPrivacyDialog = false })
+    }
+
+
+    if (showDeveloperInfoDialog) {
+        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showDeveloperInfoDialog = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Header Banner
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(colors.primary, colors.primary.copy(alpha = 0.5f))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                                .padding(3.dp)
+                                .clip(CircleShape)
+                                .background(colors.surface),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            androidx.compose.material3.Icon(
+                                androidx.compose.material.icons.Icons.Default.Person,
+                                contentDescription = null,
+                                tint = colors.primary,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = "M. M. Anik", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
+                        Text(text = "UX/UI Designer & Developer", fontSize = 14.sp, color = colors.textSecondary, fontWeight = FontWeight.Medium)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    androidx.compose.material3.HorizontalDivider(color = colors.textSecondary.copy(alpha = 0.1f))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        @Composable
+                        fun SocialLink(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, url: String) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(colors.surfaceVariant.copy(alpha = 0.5f))
+                                    .clickable { uriHandler.openUri(url) }
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.primary.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    androidx.compose.material3.Icon(icon, contentDescription = title, tint = colors.primary, modifier = Modifier.size(20.dp))
+                                }
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                                Spacer(modifier = Modifier.weight(1f))
+                                androidx.compose.material3.Icon(
+                                    androidx.compose.material.icons.Icons.Default.OpenInNew, 
+                                    contentDescription = null, 
+                                    tint = colors.textSecondary, 
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        SocialLink(androidx.compose.material.icons.Icons.Default.Language, "Website", "https://anikdesigner.blogspot.com/")
+                        SocialLink(androidx.compose.material.icons.Icons.Default.Palette, "Behance", "https://www.behance.net/mmanik")
+                        SocialLink(androidx.compose.material.icons.Icons.Default.Image, "Pikbest", "https://pikbest.com/designers/125135.html")
+                        SocialLink(androidx.compose.material.icons.Icons.Default.Work, "Upwork", "https://www.upwork.com/freelancers/~01bcd1b585e4c44189")
+                        SocialLink(androidx.compose.material.icons.Icons.Default.BusinessCenter, "LinkedIn", "https://bd.linkedin.com/in/m-m-anik")
+                        SocialLink(androidx.compose.material.icons.Icons.Default.Group, "Facebook", "https://www.facebook.com/M.M.Anik.02")
+                        SocialLink(androidx.compose.material.icons.Icons.Default.PlayArrow, "YouTube", "https://youtube.com/@m_m_anik")
+                        SocialLink(androidx.compose.material.icons.Icons.Default.CameraAlt, "Instagram", "https://www.instagram.com/m_m_anik_/")
+                    }
+                    
+                    androidx.compose.material3.HorizontalDivider(color = colors.textSecondary.copy(alpha = 0.1f))
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.material3.Button(
+                            onClick = { showDeveloperInfoDialog = false },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = colors.primary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Close", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (showConcurrentDialog) {
@@ -249,69 +392,76 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(18.dp))
 
                 // Dynamic Color Theme Palettes
-                Text(
-                    text = "Dynamic Color & Accent",
-                    color = colors.textPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "Tap to change the app's dynamic color buttons & highlights",
-                    color = colors.textSecondary,
-                    fontSize = 11.sp
-                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(colors.primary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Palette, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Accent Color",
+                            color = colors.textPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "Personalize your app's theme",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Color Selection Swatches
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ColorThemePreset.values().forEach { preset ->
                         val isSelected = colorPalette == preset.id
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                        Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .size(42.dp)
+                                .clip(CircleShape)
                                 .clickable { viewModel.setColorPalette(preset.id) }
-                                .padding(4.dp)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(preset.primary, preset.secondary)
+                                    )
+                                )
+                                .border(
+                                    width = if (isSelected) 3.dp else 1.dp,
+                                    color = if (isSelected) colors.surface else Color.White.copy(alpha = 0.3f),
+                                    shape = CircleShape
+                                )
+                                .border(
+                                    width = if (isSelected) 4.dp else 0.dp,
+                                    color = if (isSelected) preset.primary else Color.Transparent,
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(preset.primary, preset.secondary)
-                                        )
-                                    )
-                                    .border(
-                                        width = if (isSelected) 2.5.dp else 1.dp,
-                                        color = if (isSelected) Color.White else Color.Transparent,
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            Text(
-                                text = preset.label.split(" ").first(),
-                                fontSize = 10.sp,
-                                color = if (isSelected) colors.primary else colors.textSecondary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
                         }
                     }
                 }
@@ -337,15 +487,7 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(defaultElevation = if (colors.isDark) 0.dp else 2.dp)
         ) {
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
-                // Download Location
-                SettingClickableItem(
-                    icon = Icons.Default.Folder,
-                    title = "Download Location",
-                    subtitle = downloadLocation,
-                    onClick = {
-                        Toast.makeText(context, "Downloads saved to: $downloadLocation", Toast.LENGTH_SHORT).show()
-                    }
-                )
+                
 
                 // Simultaneous Downloads
                 SettingClickableItem(
@@ -431,76 +573,9 @@ fun SettingsScreen(
                 SettingClickableItem(
                     icon = Icons.Default.Info,
                     title = "Developer Info",
-                    subtitle = "M. M. Anik • anikdesigner.blogspot.com",
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://anikdesigner.blogspot.com/"))
-                        context.startActivity(intent)
-                    }
+                    subtitle = "M. M. Anik • Portfolios & Socials",
+                    onClick = { showDeveloperInfoDialog = true }
                 )
-
-                // Social Links & Portfolios
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                ) {
-                    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-                    
-                    val linkColors = colors.primary
-                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        item {
-                            androidx.compose.material3.Text(
-                                text = "Behance", 
-                                color = linkColors,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://www.behance.net/mmanik") }
-                            )
-                        }
-                        item {
-                            androidx.compose.material3.Text(
-                                text = "Pikbest", 
-                                color = linkColors,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://pikbest.com/designers/125135.html") }
-                            )
-                        }
-                        item {
-                            androidx.compose.material3.Text(
-                                text = "Upwork", 
-                                color = linkColors,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://www.upwork.com/freelancers/~01bcd1b585e4c44189") }
-                            )
-                        }
-                        item {
-                            androidx.compose.material3.Text(
-                                text = "LinkedIn", 
-                                color = linkColors,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://bd.linkedin.com/in/m-m-anik") }
-                            )
-                        }
-                        item {
-                            androidx.compose.material3.Text(
-                                text = "Facebook", 
-                                color = linkColors,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://www.facebook.com/M.M.Anik.02") }
-                            )
-                        }
-                        item {
-                            androidx.compose.material3.Text(
-                                text = "YouTube", 
-                                color = linkColors,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://youtube.com/@m_m_anik") }
-                            )
-                        }
-                        item {
-                            androidx.compose.material3.Text(
-                                text = "Instagram", 
-                                color = linkColors,
-                                modifier = Modifier.clickable { uriHandler.openUri("https://www.instagram.com/m_m_anik_/") }
-                            )
-                        }
-                    }
-                }
 
                 // Share App
                 SettingClickableItem(
