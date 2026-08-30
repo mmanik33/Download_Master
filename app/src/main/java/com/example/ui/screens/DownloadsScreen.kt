@@ -1,94 +1,98 @@
 package com.example.ui.screens
-
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.layout.ContentScale
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.text.font.FontWeight
+import com.example.model.DownloadHistoryItem
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import com.example.ui.theme.AccentPink
 import android.net.Uri
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.fillMaxSize
+import com.example.ui.theme.AccentCyan
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.Composable
+import com.example.ui.state.DownloadUiState
+import com.example.ui.theme.PrimaryPurple
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material3.DropdownMenu
+import com.example.ui.MainViewModel
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material.icons.filled.Pause
+import android.content.ClipboardManager
+import androidx.compose.material3.TabRow
+import androidx.compose.runtime.getValue
+import android.content.Context
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CardDefaults
+import androidx.core.content.FileProvider
+import androidx.compose.material3.Button
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.width
+import android.content.Intent
+import coil.compose.AsyncImage
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.ui.window.Dialog
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Card
+import coil.request.ImageRequest
+import androidx.compose.ui.platform.testTag
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.Icons
+import java.io.File
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Tab
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.lazy.LazyColumn
+import com.example.ui.theme.AppTheme
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import com.example.model.DownloadHistoryItem
-import com.example.ui.MainViewModel
-import com.example.ui.state.DownloadUiState
-import com.example.ui.theme.AccentCyan
-import com.example.ui.theme.AccentPink
-import com.example.ui.theme.AppTheme
-import com.example.ui.theme.PrimaryPurple
-import java.io.File
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.Arrangement
+
 
 @Composable
 fun DownloadsScreen(
@@ -111,7 +115,15 @@ fun DownloadsScreen(
 
     var showCancelDownloadDialog by remember { mutableStateOf(false) }
     var itemToDelete by remember { mutableStateOf<DownloadHistoryItem?>(null) }
-    var showClearAllDialog by remember { mutableStateOf(false) }
+        var showClearAllDialog by remember { mutableStateOf(false) }
+
+    // Selection mode state
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedItems by remember { mutableStateOf(setOf<String>()) }
+    var showDeleteSelectedDialog by remember { mutableStateOf(false) }
+
+    // File info state
+    var fileInfoItem by remember { mutableStateOf<DownloadHistoryItem?>(null) }
 
     val tabs = listOf(
         "All (${downloadingCount + completedCount})",
@@ -175,6 +187,40 @@ fun DownloadsScreen(
     }
 
     // Confirmation Dialog for Deleting Completed Download
+        // File Info Dialog
+    fileInfoItem?.let { item ->
+        AlertDialog(
+            onDismissRequest = { fileInfoItem = null },
+            containerColor = colors.surface,
+            title = {
+                Text(text = "Media Information", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Title:", color = colors.textSecondary, fontSize = 12.sp)
+                    Text(item.title, color = colors.textPrimary, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Quality / Format:", color = colors.textSecondary, fontSize = 12.sp)
+                    Text(if (item.isAudioOnly) "Audio" else "Video", color = colors.textPrimary, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("File Size:", color = colors.textSecondary, fontSize = 12.sp)
+                    Text(item.fileSizeFormatted, color = colors.textPrimary, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("File Path:", color = colors.textSecondary, fontSize = 12.sp)
+                    Text(item.localFilePath, color = colors.textPrimary, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Downloaded On:", color = colors.textSecondary, fontSize = 12.sp)
+                    Text(java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(item.timestamp)), color = colors.textPrimary, fontSize = 14.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { fileInfoItem = null }) {
+                    Text("Close", color = PrimaryPurple)
+                }
+            }
+        )
+    }
+
     if (itemToDelete != null) {
         val item = itemToDelete!!
         AlertDialog(
@@ -222,6 +268,41 @@ fun DownloadsScreen(
     }
 
     // Confirmation Dialog for Clearing All History
+        if (showDeleteSelectedDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelectedDialog = false },
+            containerColor = colors.surface,
+            title = {
+                Text(text = "Delete Selected?", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to delete ${selectedItems.size} items? The files will be removed from storage.",
+                    color = colors.textSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        selectedItems.forEach { id -> viewModel.removeHistoryItem(id) }
+                        selectedItems = emptySet()
+                        isSelectionMode = false
+                        showDeleteSelectedDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                ) {
+                    Text("Delete All", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteSelectedDialog = false }) {
+                    Text("Cancel", color = colors.textPrimary)
+                }
+            }
+        )
+    }
+
     if (showClearAllDialog) {
         AlertDialog(
             onDismissRequest = { showClearAllDialog = false },
@@ -401,21 +482,22 @@ fun DownloadsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 1. Active Downloading Card (shown in All or Downloading tabs)
-            if (isDownloading && (selectedTab == 0 || selectedTab == 1)) {
-                val downloadingState = activeDownload!!
-                item(key = "active_download_item") {
-                    ActiveDownloadCard(
-                        title = downloadingState.mediaInfo.title,
-                        thumbnailUrl = downloadingState.mediaInfo.thumbnailUrl,
-                        qualityTag = if (downloadingState.config.isAudioOnly) downloadingState.config.audioFormat.name else downloadingState.config.videoQuality.label,
-                        progressPercent = downloadingState.progress.progressPercent.toInt(),
-                        progressText = if (isPaused) "Paused • Tap play to resume" else downloadingState.progress.lineText.ifBlank { "${downloadingState.progress.progressPercent.toInt()}%" },
-                        speedText = if (isPaused) "Paused" else downloadingState.progress.speedText,
-                        stageText = if (isPaused) "PAUSED" else downloadingState.progress.stage.name,
-                        isPaused = isPaused,
-                        onPauseResume = { viewModel.togglePauseResumeDownload() },
-                        onCancel = { showCancelDownloadDialog = true }
-                    )
+            activeDownload?.let { downloadingState ->
+                if (selectedTab == 0 || selectedTab == 1) {
+                    item(key = "active_download_item") {
+                        ActiveDownloadCard(
+                            title = downloadingState.mediaInfo.title,
+                            thumbnailUrl = downloadingState.mediaInfo.thumbnailUrl,
+                            qualityTag = if (downloadingState.config.isAudioOnly) downloadingState.config.audioFormat.name else downloadingState.config.videoQuality.label,
+                            progressPercent = downloadingState.progress.progressPercent.toInt(),
+                            progressText = if (isPaused) "Paused • Tap play to resume" else downloadingState.progress.lineText.ifBlank { "${downloadingState.progress.progressPercent.toInt()}%" },
+                            speedText = if (isPaused) "Paused" else downloadingState.progress.speedText,
+                            stageText = if (isPaused) "PAUSED" else downloadingState.progress.stage.name,
+                            isPaused = isPaused,
+                            onPauseResume = { viewModel.togglePauseResumeDownload() },
+                            onCancel = { showCancelDownloadDialog = true }
+                        )
+                    }
                 }
             }
 
@@ -650,10 +732,14 @@ private fun ActiveDownloadCard(
 @Composable
 private fun CompletedDownloadCard(
     item: DownloadHistoryItem,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
+    onSelectToggle: () -> Unit = {},
     onPlay: () -> Unit,
     onShare: () -> Unit,
     onCopyLink: () -> Unit,
     onDelete: () -> Unit,
+    onInfo: () -> Unit = {},
     onReDownload: () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -663,8 +749,11 @@ private fun CompletedDownloadCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onPlay() },
-        colors = CardDefaults.cardColors(containerColor = colors.surface),
+            .border(if (isSelected) 2.dp else 0.dp, if (isSelected) PrimaryPurple else Color.Transparent, RoundedCornerShape(16.dp))
+            .clickable {
+                if (isSelectionMode) onSelectToggle() else onPlay()
+            },
+        colors = CardDefaults.cardColors(containerColor = if (isSelected) PrimaryPurple.copy(alpha = 0.1f) else colors.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = if (colors.isDark) 0.dp else 2.dp)
     ) {
         Row(
@@ -783,6 +872,14 @@ private fun CompletedDownloadCard(
                         onClick = {
                             showMenu = false
                             onReDownload()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Media Info", color = colors.textPrimary) },
+                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = colors.textPrimary) },
+                        onClick = {
+                            showMenu = false
+                            onInfo()
                         }
                     )
                     DropdownMenuItem(

@@ -109,6 +109,7 @@ class YtDlpRepository(private val context: Context) {
                 request.addOption("--no-playlist")
                 request.addOption("--no-check-certificates")
                 request.addOption("--geo-bypass")
+                request.addOption("--force-ipv4")
                 request.addOption("--skip-download")
                 request.addOption("--no-warnings")
                 request.addOption("--no-call-home")
@@ -432,17 +433,18 @@ class YtDlpRepository(private val context: Context) {
                 }
 
                 // Distinct output template by resolution/quality so multiple resolutions of the same video never clash
-                val qualityTag = if (config.isAudioOnly) {
+                var rawQualityTag = if (config.isAudioOnly) {
                     config.audioFormat.name
                 } else {
                     val fid = config.selectedFormatId ?: ""
                     if (fid.isNotEmpty()) {
-                        val displayTag = if (fid.contains("_")) fid.substringAfter("_") else fid
-                        displayTag.replace(" ", "_")
+                        if (fid.contains("_")) fid.substringAfter("_") else fid
                     } else {
-                        config.videoQuality.label.replace(" ", "_")
+                        config.videoQuality.label
                     }
                 }
+                // Strictly sanitize quality tag to prevent filesystem errors (e.g. if fid contains '/')
+                val qualityTag = rawQualityTag.replace(Regex("[^a-zA-Z0-9.-]"), "_")
                 
                 // Format output file template with quality indicator to prevent file collisions
                 val outputTemplate = "%(title).80B-%(id)s-[$qualityTag].%(ext)s"
@@ -456,6 +458,7 @@ class YtDlpRepository(private val context: Context) {
                 request.addOption("--no-playlist")
                 request.addOption("--no-check-certificates")
                 request.addOption("--geo-bypass")
+                request.addOption("--force-ipv4")
                 request.addOption("--retries", "10")
                 request.addOption("--fragment-retries", "10")
                 request.addOption("--concurrent-fragments", "4")
