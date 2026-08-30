@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-and-release:
-    name: Build & Release APKs and AAB
+    name: Build & Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -86,13 +86,6 @@ jobs:
           fi
           gradle :app:assembleRelease --stacktrace --no-daemon
 
-      - name: Build Google Play Release AAB
-        env:
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
-        run: |
-          echo "=== Building Google Play Store AAB Bundle ==="
-          gradle :app:bundleRelease --stacktrace --no-daemon
-
       - name: Verify and Package Release Assets
         id: prepare_assets
         run: |
@@ -101,7 +94,6 @@ jobs:
           mkdir -p "$TEMP_ASSET_DIR"
           
           APK_DIR="app/build/outputs/apk/release"
-          AAB_DIR="app/build/outputs/bundle/release"
           
           # Universal APK Verification
           SRC_APK=$(find "$APK_DIR" -name "*.apk" -type f | head -n 1)
@@ -115,20 +107,7 @@ jobs:
           cp "$SRC_APK" "$DEST_APK"
           echo "✓ Verified Universal APK: Download-Master-universal-release.apk ($(du -h "$DEST_APK" | cut -f1))"
           
-          # AAB Bundle Verification
-          SRC_AAB=$(find "$AAB_DIR" -name "*.aab" -type f | head -n 1)
-          DEST_AAB="$TEMP_ASSET_DIR/Download-Master-release.aab"
-          
-          if [ -z "$SRC_AAB" ] || [ ! -f "$SRC_AAB" ] || [ ! -s "$SRC_AAB" ]; then
-            echo "ERROR: Release AAB not found or empty in $AAB_DIR!"
-            exit 1
-          fi
-          
-          cp "$SRC_AAB" "$DEST_AAB"
-          echo "✓ Verified Google Play Bundle: Download-Master-release.aab ($(du -h "$DEST_AAB" | cut -f1))"
-          
           echo "asset_dir=$TEMP_ASSET_DIR" >> "$GITHUB_OUTPUT"
-
       - name: Publish Release Assets to GitHub Releases
         id: publish_release
         env:
@@ -141,7 +120,6 @@ jobs:
           RELEASE_TITLE="Download Master Release Build #${{ github.run_number }}"
           
           APK_SIZE=$(du -h "$ASSET_DIR/Download-Master-universal-release.apk" | cut -f1)
-          AAB_SIZE=$(du -h "$ASSET_DIR/Download-Master-release.aab" | cut -f1)
           
           RELEASE_NOTES="### Download Master Release Build #${{ github.run_number }}
           
@@ -151,22 +129,16 @@ jobs:
           - **Universal APK:** \`Download-Master-universal-release.apk\` (~$APK_SIZE)
             *(Optimized universal installation package containing full video & audio download capabilities for all Android smartphones and tablets)*
           
-          #### 📦 Google Play Store Distribution:
-          - **Android App Bundle:** \`Download-Master-release.aab\` (~$AAB_SIZE)
-            *(Dynamic delivery bundle with automated on-device optimization for Google Play Store)*
-          
           ---
           - **Commit SHA:** \`${{ github.sha }}\`
           - **Build:** GitHub Actions Run #${{ github.run_number }}"
           
           gh release create "$RELEASE_TAG" \
             "$ASSET_DIR/Download-Master-universal-release.apk" \
-            "$ASSET_DIR/Download-Master-release.aab" \
             --title "$RELEASE_TITLE" \
             --notes "$RELEASE_NOTES" \
             --target "${{ github.sha }}" \
             --latest
-
       - name: Report Build & Release Result
         if: always()
         env:
@@ -187,6 +159,5 @@ jobs:
           
           ### 📱 Available Downloads:
           1. **\`Download-Master-universal-release.apk\`** — Universal installation APK for all Android devices.
-          2. **\`Download-Master-release.aab\`** — Android App Bundle for Google Play Store console upload.
           EOF
           fi

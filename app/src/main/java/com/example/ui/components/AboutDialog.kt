@@ -63,7 +63,7 @@ fun AboutDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Info, contentDescription = null, tint = PrimaryPurple, modifier = Modifier.size(24.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("About Download Master", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                        Text("About app", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
                     }
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = colors.textSecondary)
@@ -80,7 +80,10 @@ fun AboutDialog(
                         .padding(14.dp)
                 ) {
                     Text("Download Master", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
-                    Text("Version 2.4.0 (Latest Release)", fontSize = 12.sp, color = PrimaryPurple)
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                    val versionName = packageInfo.versionName ?: "1.0.0"
+                    Text("Version $versionName (Latest Release)", fontSize = 12.sp, color = PrimaryPurple)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("• Embedded yt-dlp Engine: $ytDlpVersion", fontSize = 12.sp, color = colors.textSecondary)
                     Text("• Embedded FFmpeg 6.0 (Hardware-accelerated muxing)", fontSize = 12.sp, color = colors.textSecondary)

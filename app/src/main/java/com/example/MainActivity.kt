@@ -162,6 +162,9 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
 
     var showCookieDialog by remember { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
+    
+    val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+    var hasAcceptedWarning by remember { mutableStateOf(prefs.getBoolean("has_accepted_warning", false)) }
     val qualitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Intercept Back Button: If user is on any other page, navigate back to Home instead of quitting
@@ -169,10 +172,13 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
         viewModel.selectTab(MainTab.HOME)
     }
 
+    var isPermissionDone by remember { mutableStateOf(Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) }
+
     // Notification Permission for background downloads
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
+        isPermissionDone = true
         if (!isGranted) {
             coroutineScope.launch {
                 snackbarHostState.showSnackbar("Notifications allow real-time download progress.")
@@ -182,9 +188,13 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                isPermissionDone = true
             }
+        } else {
+            isPermissionDone = true
         }
     }
 
@@ -206,6 +216,42 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
             onDownloadSelected = { quality, isAudioOnly, audioFormat, formatId ->
                 viewModel.startDownloadWithQuality(readyState.mediaInfo, quality, isAudioOnly, formatId)
                 viewModel.selectTab(MainTab.DOWNLOADS)
+            }
+        )
+    }
+
+    if (isPermissionDone && !hasAcceptedWarning) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { /* No dismiss by tapping outside */ },
+            containerColor = colors.surface,
+            title = {
+                Text(
+                    text = "Warning",
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "If anyone downloads anything unethical using this app, the burden of that sin is solely on the user. The developer will in no way share this sin.",
+                    color = colors.textSecondary
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    prefs.edit().putBoolean("has_accepted_warning", true).apply()
+                    hasAcceptedWarning = true
+                }) {
+                    Text("Accept", color = colors.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val activity = context as? android.app.Activity
+                    activity?.finishAffinity()
+                }) {
+                    Text("Reject", color = Color(0xFFEF4444))
+                }
             }
         )
     }
