@@ -25,6 +25,8 @@ import com.example.ui.state.DownloadUiState
 import com.example.ui.theme.PrimaryPurple
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.material3.DropdownMenu
 import com.example.ui.MainViewModel
@@ -123,15 +125,25 @@ fun DownloadsScreen(
     // File info state
     var fileInfoItem by remember { mutableStateOf<DownloadHistoryItem?>(null) }
 
+    val completedOnlyCount = historyItems.count { it.status == "Completed" }
+    val cancelledCount = historyItems.count { it.status == "Cancelled" }
+    
     val tabs = listOf(
-        "All (${downloadingCount + completedCount})",
+        "All (${downloadingCount + historyItems.size})",
         "Downloading ($downloadingCount)",
-        "Completed ($completedCount)"
+        "Completed ($completedOnlyCount)",
+        "Cancelled ($cancelledCount)"
     )
 
     // Filtered Completed Items based on search and media type filter
-    val filteredHistoryItems = remember(historyItems, searchQuery, mediaTypeFilter) {
+    val filteredHistoryItems = remember(historyItems, searchQuery, mediaTypeFilter, selectedTab) {
         historyItems.filter { item ->
+            val matchesTab = when (selectedTab) {
+                0 -> true // All
+                2 -> item.status == "Completed"
+                3 -> item.status == "Cancelled"
+                else -> false
+            }
             val matchesSearch = searchQuery.isBlank() ||
                     item.title.contains(searchQuery, ignoreCase = true) ||
                     item.webpageUrl.contains(searchQuery, ignoreCase = true)
@@ -140,8 +152,39 @@ fun DownloadsScreen(
                 2 -> item.isAudioOnly
                 else -> true
             }
-            matchesSearch && matchesType
+            matchesTab && matchesSearch && matchesType
         }
+    }
+
+    // Active Download Cancel Confirmation Dialog
+    if (showCancelDownloadDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelDownloadDialog = false },
+            containerColor = colors.surface,
+            title = {
+                Text(text = "Cancel Download?", fontWeight = FontWeight.Bold, color = colors.textPrimary)
+            },
+            text = {
+                Text(text = "Are you sure you want to cancel this download? It will be moved to history as Cancelled.", color = colors.textSecondary)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    itemToDelete?.id?.let { viewModel.cancelDownload(it) } // using itemToDelete for holding active processId temporarily
+                    showCancelDownloadDialog = false
+                    itemToDelete = null
+                }) {
+                    Text("Yes, Cancel", color = Color(0xFFEF4444))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showCancelDownloadDialog = false 
+                    itemToDelete = null
+                }) {
+                    Text("No", color = colors.textSecondary)
+                }
+            }
+        )
     }
 
     // Delete Single Item Dialog
@@ -257,8 +300,11 @@ fun DownloadsScreen(
             title = { Text("Media Information", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Title: ${fileInfoItem?.title}", color = colors.textSecondary)
-                    Text("Format: ${if (fileInfoItem?.isAudioOnly == true) "Audio" else "Video"}", color = colors.textSecondary)
+                    Text("Title: ${fileInfoItem?.title}", color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                    Text("Status: ${fileInfoItem?.status}", color = colors.textSecondary)
+                    Text("Format: ${if (fileInfoItem?.isAudioOnly == true) "Audio" else "Video"} (${fileInfoItem?.resolution})", color = colors.textSecondary)
+                    Text("WiFi Only: ${if (fileInfoItem?.wifiOnly == true) "Yes" else "No"}", color = colors.textSecondary)
+                    Text("Resumable: ${if (fileInfoItem?.isResumable == true) "Yes" else "No"}", color = colors.textSecondary)
                     Text("Size: ${fileInfoItem?.fileSizeFormatted}", color = colors.textSecondary)
                     Text("Saved at: ${fileInfoItem?.localFilePath}", color = colors.textSecondary)
                 }
@@ -312,13 +358,7 @@ fun DownloadsScreen(
 
                 if (historyItems.isNotEmpty() && selectedTab != 1) {
                     Row {
-                        IconButton(onClick = { isSelectionMode = true }) {
-                            Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Default.Checklist,
-                                contentDescription = "Select Mode",
-                                tint = colors.textSecondary
-                            )
-                        }
+
                         IconButton(onClick = { showClearAllDialog = true }) {
                             Icon(
                                 imageVector = androidx.compose.material.icons.Icons.Default.DeleteSweep,
@@ -462,8 +502,9 @@ fun DownloadsScreen(
                         isPaused = downloadingState.isPaused,
                         onPauseResume = { viewModel.togglePauseResumeDownload(downloadingState.processId) },
                         onCancel = { 
-                            // Quick way to cancel without dialog for multi-downloads, or use dialog but track ID
-                            viewModel.cancelDownload(downloadingState.processId) 
+                            // Use dummy history item just to hold processId for the dialog
+                            itemToDelete = DownloadHistoryItem(id = downloadingState.processId, title = "", webpageUrl = "", localFilePath = "", fileSizeFormatted = "", isAudioOnly = false)
+                            showCancelDownloadDialog = true
                         }
                     )
                 }
@@ -477,9 +518,9 @@ fun DownloadsScreen(
             }
 
             // 3. Completed Download Cards (shown in All or Completed tabs)
-            if (selectedTab == 0 || selectedTab == 2) {
+            if (selectedTab == 0 || selectedTab == 2 || selectedTab == 3) {
                 if (filteredHistoryItems.isEmpty()) {
-                    if (historyItems.isEmpty() && (!activeDownloads.isNotEmpty() || selectedTab == 2)) {
+                    if (historyItems.isEmpty() && (!activeDownloads.isNotEmpty() || selectedTab == 2 || selectedTab == 3)) {
                         item {
                             EmptyDownloadsView(message = "No completed downloads yet. Paste a link to start downloading!")
                         }
@@ -710,6 +751,7 @@ private fun ActiveDownloadCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CompletedDownloadCard(
     item: DownloadHistoryItem,
@@ -731,9 +773,10 @@ private fun CompletedDownloadCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .border(if (isSelected) 2.dp else 0.dp, if (isSelected) PrimaryPurple else Color.Transparent, RoundedCornerShape(16.dp))
-            .clickable {
-                if (isSelectionMode) onSelectToggle() else onPlay()
-            },
+            .combinedClickable(
+                onClick = { if (isSelectionMode) onSelectToggle() else onPlay() },
+                onLongClick = { onSelectToggle() }
+            ),
         colors = CardDefaults.cardColors(containerColor = if (isSelected) PrimaryPurple.copy(alpha = 0.1f) else colors.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = if (colors.isDark) 0.dp else 2.dp)
     ) {

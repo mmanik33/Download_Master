@@ -164,7 +164,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is DownloadForegroundService.DownloadEvent.Completed -> {
                         val current = activeDownloads.value[event.id]
                         if (current != null) {
-                            addHistoryItem(current.mediaInfo, event.file, current.config.isAudioOnly)
+                            addHistoryItem(current.mediaInfo, event.file, current.config, "Completed")
                             activeDownloads.value = activeDownloads.value - event.id
                         }
                         if (activeDownloads.value.isEmpty()) {
@@ -178,6 +178,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Cancelled -> {
+                        val current = activeDownloads.value[event.id]
+                        if (current != null) {
+                            addHistoryItem(current.mediaInfo, null, current.config, "Cancelled")
+                        }
                         activeDownloads.value = activeDownloads.value - event.id
                         if (activeDownloads.value.isEmpty()) {
                             _uiState.value = DownloadUiState.Idle
@@ -450,17 +454,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun addHistoryItem(media: MediaModel, file: File, audioOnly: Boolean) {
+    private fun addHistoryItem(
+        media: MediaModel,
+        file: File?,
+        config: DownloadConfig,
+        status: String = "Completed"
+    ) {
         val newItem = DownloadHistoryItem(
             id = System.currentTimeMillis().toString(),
             title = media.title,
             webpageUrl = media.webpageUrl,
-            localFilePath = file.absolutePath,
-            fileSizeFormatted = formatFileSize(file.length()),
-            isAudioOnly = audioOnly,
-            thumbnailUrl = media.thumbnailUrl
+            localFilePath = file?.absolutePath ?: "",
+            fileSizeFormatted = file?.let { formatFileSize(it.length()) } ?: "0 B",
+            isAudioOnly = config.isAudioOnly,
+            thumbnailUrl = media.thumbnailUrl,
+            status = status,
+            resolution = if (config.isAudioOnly) config.audioFormat.name else config.videoQuality.label,
+            wifiOnly = useWifiOnly.value,
+            isResumable = true
         )
-        val updated = listOf(newItem) + _downloadHistory.value.filter { it.localFilePath != file.absolutePath }
+        // If there's an existing item for this file (and file is not null), replace it. 
+        // For cancelled items, we might not have a file, just append.
+        val updated = if (file != null) {
+            listOf(newItem) + _downloadHistory.value.filter { it.localFilePath != file.absolutePath }
+        } else {
+            listOf(newItem) + _downloadHistory.value
+        }
         _downloadHistory.value = updated.take(50)
         saveHistory()
     }
@@ -489,6 +508,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     put("isAudioOnly", item.isAudioOnly)
                     put("timestamp", item.timestamp)
                     put("thumbnailUrl", item.thumbnailUrl ?: "")
+                    put("status", item.status)
+                    put("resolution", item.resolution)
+                    put("wifiOnly", item.wifiOnly)
+                    put("isResumable", item.isResumable)
                 }
                 jsonArray.put(obj)
             }
@@ -514,7 +537,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         fileSizeFormatted = obj.optString("fileSizeFormatted", ""),
                         isAudioOnly = obj.optBoolean("isAudioOnly", false),
                         timestamp = obj.optLong("timestamp", 0L),
-                        thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() }
+                        thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
+                        status = obj.optString("status", "Completed"),
+                        resolution = obj.optString("resolution", ""),
+                        wifiOnly = obj.optBoolean("wifiOnly", false),
+                        isResumable = obj.optBoolean("isResumable", true)
                     )
                 )
             }

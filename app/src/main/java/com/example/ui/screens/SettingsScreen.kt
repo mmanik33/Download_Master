@@ -355,13 +355,7 @@ fun SettingsScreen(
                     onClick = { showConcurrentDialog = true }
                 )
 
-                // Default Quality
-                SettingClickableItem(
-                    icon = Icons.Default.HighQuality,
-                    title = "Default Quality",
-                    subtitle = defaultQuality,
-                    onClick = { showQualityPrefDialog = true }
-                )
+                
 
                 // Wi-Fi Only Toggle
                 SettingSwitchItem(
@@ -430,20 +424,83 @@ fun SettingsScreen(
             elevation = CardDefaults.cardElevation(defaultElevation = if (colors.isDark) 0.dp else 2.dp)
         ) {
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
-                // Rate Us
+                
+
+                
+                // Developer Info
                 SettingClickableItem(
-                    icon = Icons.Default.RateReview,
-                    title = "Rate Us",
-                    subtitle = "Support Download Master with 5 stars",
+                    icon = Icons.Default.Info,
+                    title = "Developer Info",
+                    subtitle = "M. M. Anik • anikdesigner.blogspot.com",
                     onClick = {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}"))
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Thank you for rating Download Master!", Toast.LENGTH_SHORT).show()
-                        }
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://anikdesigner.blogspot.com/"))
+                        context.startActivity(intent)
                     }
                 )
+
+                // Social Links & Portfolios
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp, horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                    
+                    val linkColors = colors.primary
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        item {
+                            androidx.compose.material3.Text(
+                                text = "Behance", 
+                                color = linkColors,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://www.behance.net/mmanik") }
+                            )
+                        }
+                        item {
+                            androidx.compose.material3.Text(
+                                text = "Pikbest", 
+                                color = linkColors,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://pikbest.com/designers/125135.html") }
+                            )
+                        }
+                        item {
+                            androidx.compose.material3.Text(
+                                text = "Upwork", 
+                                color = linkColors,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://www.upwork.com/freelancers/~01bcd1b585e4c44189") }
+                            )
+                        }
+                        item {
+                            androidx.compose.material3.Text(
+                                text = "LinkedIn", 
+                                color = linkColors,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://bd.linkedin.com/in/m-m-anik") }
+                            )
+                        }
+                        item {
+                            androidx.compose.material3.Text(
+                                text = "Facebook", 
+                                color = linkColors,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://www.facebook.com/M.M.Anik.02") }
+                            )
+                        }
+                        item {
+                            androidx.compose.material3.Text(
+                                text = "YouTube", 
+                                color = linkColors,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://youtube.com/@m_m_anik") }
+                            )
+                        }
+                        item {
+                            androidx.compose.material3.Text(
+                                text = "Instagram", 
+                                color = linkColors,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://www.instagram.com/m_m_anik_/") }
+                            )
+                        }
+                    }
+                }
 
                 // Share App
                 SettingClickableItem(

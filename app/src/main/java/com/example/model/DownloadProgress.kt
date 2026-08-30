@@ -36,5 +36,9 @@ data class DownloadHistoryItem(
     val fileSizeFormatted: String,
     val isAudioOnly: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
-    val thumbnailUrl: String? = null
+    val thumbnailUrl: String? = null,
+    val status: String = "Completed",
+    val resolution: String = "",
+    val wifiOnly: Boolean = false,
+    val isResumable: Boolean = false
 )

@@ -204,7 +204,8 @@ class DownloadForegroundService : Service() {
         jobState.job?.cancel()
         
         // Re-generate ID on resume for yt-dlp process
-        val effectiveProcessId = if (isResume) "${jobState.processId}_resumed_${System.currentTimeMillis()}" else jobState.processId
+        val effectiveProcessId = jobState.processId
+        repository.resetProcessState(effectiveProcessId)
 
         jobState.job = serviceScope.launch {
             if (!isResume) {

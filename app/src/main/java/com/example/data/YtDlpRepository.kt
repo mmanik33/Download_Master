@@ -871,6 +871,11 @@ class YtDlpRepository(private val context: Context) {
         }
     }
 
+    fun resetProcessState(processId: String) {
+        cancelledProcessIds.remove(processId)
+        pausedProcessIds.remove(processId)
+    }
+
     fun cancelDownload(processId: String): Boolean {
         cancelledProcessIds[processId] = true
         pausedProcessIds.remove(processId)
