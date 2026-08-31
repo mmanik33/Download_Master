@@ -818,9 +818,10 @@ class YtDlpRepository(private val context: Context) {
     private fun resolveFormatFilter(config: DownloadConfig): String {
         val fid = config.selectedFormatId?.trim()
         val targetHeight = resolveTargetHeight(config)
+        val isYouTube = config.url.contains("youtube.com", ignoreCase = true) || config.url.contains("youtu.be", ignoreCase = true)
         Log.i(TAG, "Resolving format filter: selectedFormatId='$fid', quality=${config.videoQuality.label}, targetHeight=$targetHeight")
 
-        if (!fid.isNullOrBlank() && fid != "best") {
+        if (!fid.isNullOrBlank() && fid != "best" && !isYouTube) {
             // 1. If formatId is encoded as "<format_id>@<height>p" (e.g. "137@1080p")
             if (fid.contains("@")) {
                 val streamId = fid.substringBefore("@").trim()
