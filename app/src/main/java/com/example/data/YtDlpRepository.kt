@@ -820,11 +820,6 @@ class YtDlpRepository(private val context: Context) {
         val targetHeight = resolveTargetHeight(config)
         Log.i(TAG, "Resolving format filter: selectedFormatId='$fid', quality=${config.videoQuality.label}, targetHeight=$targetHeight")
 
-        if (targetHeight != null && targetHeight > 0) {
-            // Strict resolution prioritizing best video at target height merged with best audio, followed by closest resolutions
-            return "bestvideo[height<=$targetHeight]+bestaudio[ext=m4a]/bestvideo[height<=$targetHeight]+bestaudio/bestvideo[height<=$targetHeight]+ba/bestvideo[height<=${targetHeight + 80}]+bestaudio/bestvideo+bestaudio/best[height<=$targetHeight]/best"
-        }
-
         if (!fid.isNullOrBlank() && fid != "best") {
             // 1. If formatId is encoded as "<format_id>@<height>p" (e.g. "137@1080p")
             if (fid.contains("@")) {
@@ -832,7 +827,7 @@ class YtDlpRepository(private val context: Context) {
                 val heightStr = fid.substringAfter("@").removeSuffix("p").trim()
                 val h = heightStr.toIntOrNull()
                 if (h != null && h > 0) {
-                    return "$streamId+bestaudio[ext=m4a]/$streamId+bestaudio/$streamId+ba/bestvideo[height<=$h]+bestaudio/best[height<=$h]/bestvideo+bestaudio/best"
+                    return "$streamId+bestaudio[ext=m4a]/$streamId+bestaudio/$streamId+ba/$streamId/bestvideo[height<=$h]+bestaudio/best[height<=$h]/bestvideo+bestaudio/best"
                 } else if (streamId.isNotBlank()) {
                     return "$streamId+bestaudio/$streamId+ba/$streamId/best"
                 }
@@ -849,6 +844,12 @@ class YtDlpRepository(private val context: Context) {
             } else if (fid == "tik_sd") {
                 return "bestvideo[height<=720]+bestaudio/bestvideo[height<=720]+ba/best[height<=720]/best"
             }
+        }
+
+        
+        if (targetHeight != null && targetHeight > 0) {
+            // Strict resolution prioritizing best video at target height merged with best audio, followed by closest resolutions
+            return "bestvideo[height<=$targetHeight]+bestaudio[ext=m4a]/bestvideo[height<=$targetHeight]+bestaudio/bestvideo[height<=$targetHeight]+ba/bestvideo[height<=${targetHeight + 80}]+bestaudio/bestvideo+bestaudio/best[height<=$targetHeight]/best"
         }
 
         return "bestvideo+bestaudio/best"
