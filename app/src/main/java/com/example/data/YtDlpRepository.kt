@@ -242,7 +242,7 @@ class YtDlpRepository(private val context: Context) {
     private fun extractTikTokFast(cleanUrl: String): MediaModel? {
         return try {
             val encoded = URLEncoder.encode(cleanUrl, "UTF-8")
-            val apiUrl = "https://www.tikwm.com/api/?url=$encoded"
+            val apiUrl = "https://www.tikwm.com/api/?url=$encoded&hd=1"
             val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 5000
@@ -262,7 +262,9 @@ class YtDlpRepository(private val context: Context) {
                     val cover = data.optString("cover").takeIf { it.isNotBlank() }
                     val duration = data.optLong("duration", 0L)
                     val playUrl = data.optString("play").takeIf { it.isNotBlank() } // Direct HD No-Watermark
-                    val hdPlayUrl = data.optString("hdplay").takeIf { it.isNotBlank() } ?: playUrl
+                    val hdPlayUrl = data.optString("hdplay").takeIf { it.isNotBlank() }
+                    
+                    val actualHdPlayUrl = if (hdPlayUrl != null && hdPlayUrl != playUrl) hdPlayUrl else null
                     val musicUrl = data.optString("music").takeIf { it.isNotBlank() }
                     val size = data.optLong("size", 0L)
 
@@ -273,7 +275,7 @@ class YtDlpRepository(private val context: Context) {
                     val formats = mutableListOf<FormatModel>()
 
                     // HD format
-                    if (!hdPlayUrl.isNullOrBlank()) {
+                    if (!actualHdPlayUrl.isNullOrBlank()) {
                         formats.add(
                             FormatModel(
                                 formatId = "tik_hd",
@@ -281,11 +283,11 @@ class YtDlpRepository(private val context: Context) {
                                 resolution = "1080p (HD)",
                                 width = 1080,
                                 height = 1920,
-                                fileSize = if (size > 0) size else 0L,
+                                fileSize = if (size > 0) (size * 1.5).toLong() else 0L,
                                 formatNote = "HD No Watermark",
                                 isVideo = true,
                                 isAudioOnly = false,
-                                directUrl = hdPlayUrl
+                                directUrl = actualHdPlayUrl
                             )
                         )
                     }
