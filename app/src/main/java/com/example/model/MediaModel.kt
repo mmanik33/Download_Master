@@ -46,7 +46,8 @@ data class FormatModel(
     val fileSize: Long = 0,
     val formatNote: String? = null,
     val isVideo: Boolean = true,
-    val isAudioOnly: Boolean = false
+    val isAudioOnly: Boolean = false,
+    val directUrl: String? = null
 ) {
     val displayLabel: String
         get() {

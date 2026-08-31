@@ -93,6 +93,10 @@ class YtDlpRepository(private val context: Context) {
                 }
             )
             isInstagram -> listOf(
+                { _ -> /* default yt-dlp */ },
+                { req ->
+                    req.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                },
                 { req ->
                     req.addOption("--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
                 }
@@ -112,8 +116,7 @@ class YtDlpRepository(private val context: Context) {
                 request.addOption("--force-ipv4")
                 request.addOption("--skip-download")
                 request.addOption("--no-warnings")
-                request.addOption("--no-call-home")
-                request.addOption("--socket-timeout", "7")
+                                request.addOption("--socket-timeout", "7")
                 request.addOption("--extractor-retries", "1")
                 request.addOption("--flat-playlist")
                 request.addOption("--compat-options", "no-youtube-unavailable-videos")
@@ -281,7 +284,8 @@ class YtDlpRepository(private val context: Context) {
                                 fileSize = if (size > 0) size else 0L,
                                 formatNote = "HD No Watermark",
                                 isVideo = true,
-                                isAudioOnly = false
+                                isAudioOnly = false,
+                                directUrl = hdPlayUrl
                             )
                         )
                     }
@@ -298,7 +302,8 @@ class YtDlpRepository(private val context: Context) {
                                 fileSize = if (size > 0) (size * 0.8).toLong() else 0L,
                                 formatNote = "Standard No Watermark",
                                 isVideo = true,
-                                isAudioOnly = false
+                                isAudioOnly = false,
+                                directUrl = playUrl
                             )
                         )
                     }
@@ -315,7 +320,8 @@ class YtDlpRepository(private val context: Context) {
                                 fileSize = 0L,
                                 formatNote = "Original Audio MP3",
                                 isVideo = false,
-                                isAudioOnly = true
+                                isAudioOnly = true,
+                                directUrl = musicUrl
                             )
                         )
                     }
@@ -359,6 +365,7 @@ class YtDlpRepository(private val context: Context) {
 
         val isTikTok = isTikTokUrl(config.url)
         val isYouTube = config.url.contains("youtube.com", ignoreCase = true) || config.url.contains("youtu.be", ignoreCase = true)
+        val isInstagram = config.url.contains("instagram.com", ignoreCase = true)
 
         // 1. Direct High-Speed Stream Download for TikTok
         if (isTikTok) {
@@ -366,9 +373,11 @@ class YtDlpRepository(private val context: Context) {
                 Log.d(TAG, "Attempting high-speed direct download for TikTok: ${config.url}")
                 val directMedia = extractTikTokFast(config.url)
                 val directUrl = if (config.isAudioOnly) {
-                    directMedia?.availableFormats?.firstOrNull { it.isAudioOnly }?.formatId ?: directMedia?.directVideoUrl
+                    directMedia?.availableFormats?.firstOrNull { it.isAudioOnly }?.directUrl ?: directMedia?.directVideoUrl
                 } else {
-                    directMedia?.directVideoUrl
+                    val fid = config.selectedFormatId
+                    val selectedFormat = directMedia?.availableFormats?.firstOrNull { it.formatId == fid }
+                    selectedFormat?.directUrl ?: directMedia?.directVideoUrl
                 }
 
                 if (!directUrl.isNullOrBlank() && (directUrl.startsWith("http://") || directUrl.startsWith("https://"))) {
@@ -418,6 +427,15 @@ class YtDlpRepository(private val context: Context) {
                 },
                 { req ->
                     req.addOption("--extractor-args", "youtube:player_client=ios")
+                }
+            )
+            isInstagram -> listOf(
+                { _ -> /* default yt-dlp */ },
+                { req ->
+                    req.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                },
+                { req ->
+                    req.addOption("--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
                 }
             )
             else -> listOf({ _ -> /* standard */ })
