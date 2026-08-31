@@ -371,7 +371,8 @@ class YtDlpRepository(private val context: Context) {
         if (isTikTok) {
             try {
                 Log.d(TAG, "Attempting high-speed direct download for TikTok: ${config.url}")
-                val directMedia = extractTikTokFast(config.url)
+                val cleanUrl = config.url.trim()
+                val directMedia = metadataCache.get(cleanUrl) ?: extractTikTokFast(cleanUrl)
                 val directUrl = if (config.isAudioOnly) {
                     directMedia?.availableFormats?.firstOrNull { it.isAudioOnly }?.directUrl ?: directMedia?.directVideoUrl
                 } else {
@@ -391,12 +392,19 @@ class YtDlpRepository(private val context: Context) {
                         targetFile = File(downloadDir, "${sanitizedTitle}_[${qualityTag}]_$counter.$extension")
                         counter++
                     }
+                    
+                    val partFile = File(targetFile.absolutePath + ".part")
 
-                    val downloadResult = downloadDirectHttpStream(directUrl, targetFile, processId, onProgress)
+                    val downloadResult = downloadDirectHttpStream(directUrl, partFile, processId, onProgress)
                     if (downloadResult.isSuccess) {
-                        val finalFile = downloadResult.getOrThrow()
-                        scanMediaFile(finalFile)
-                        return@withContext Result.success(finalFile)
+                        val finalPartFile = downloadResult.getOrThrow()
+                        if (finalPartFile.exists()) {
+                            finalPartFile.renameTo(targetFile)
+                        }
+                        scanMediaFile(targetFile)
+                        return@withContext Result.success(targetFile)
+                    } else {
+                        if (partFile.exists()) partFile.delete()
                     }
                 }
             } catch (e: Exception) {
@@ -937,6 +945,27 @@ class YtDlpRepository(private val context: Context) {
             "twitch.tv" in lower -> "Twitch"
             "pinterest.com" in lower -> "Pinterest"
             else -> "Web Media"
+        }
+    }
+
+    fun cleanupIncompleteFiles() {
+        try {
+            val downloadDir = getDownloadDirectory()
+            if (downloadDir.exists() && downloadDir.isDirectory) {
+                val incompleteFiles = downloadDir.listFiles { file ->
+                    val name = file.name.lowercase()
+                    name.endsWith(".part") || name.endsWith(".ytdl") || name.startsWith("temp_dl_")
+                }
+                incompleteFiles?.forEach { file ->
+                    try {
+                        file.delete()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to delete incomplete file: ${file.name}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Cleanup incomplete files error", e)
         }
     }
 }

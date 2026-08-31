@@ -281,6 +281,7 @@ class DownloadForegroundService : Service() {
                 },
                 onFailure = { error ->
                     Log.e(TAG, "Download failed", error)
+                    repository.cleanupIncompleteFiles()
                     _downloadEvents.emit(DownloadEvent.Failed(jobState.processId, error.localizedMessage ?: "Unknown error"))
                     showFailureNotification(jobState.config.title, error.localizedMessage ?: "Download failed")
                     removeJobAndCheckStop(jobState.processId)
@@ -294,6 +295,7 @@ class DownloadForegroundService : Service() {
         Log.i(TAG, "Cancelling active download process: $processId")
         repository.cancelDownload(jobState.processId)
         jobState.job?.cancel()
+        repository.cleanupIncompleteFiles()
         serviceScope.launch { _downloadEvents.emit(DownloadEvent.Cancelled(processId)) }
         removeJobAndCheckStop(processId)
     }
