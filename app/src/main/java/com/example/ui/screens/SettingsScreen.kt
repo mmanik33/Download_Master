@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.BusinessCenter
 import androidx.compose.material.icons.filled.Group
@@ -58,6 +59,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -106,12 +108,16 @@ fun SettingsScreen(
     var showQualityPrefDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
+    var showDisclaimerDialog by remember { mutableStateOf(false) }
 
     if (showAboutDialog) {
         AboutDialog(ytDlpVersion = ytDlpVersion, onDismiss = { showAboutDialog = false })
     }
     if (showPrivacyDialog) {
         PrivacyPolicyDialog(onDismiss = { showPrivacyDialog = false })
+    }
+    if (showDisclaimerDialog) {
+        DisclaimerDialog(onDismiss = { showDisclaimerDialog = false })
     }
 
 
@@ -708,6 +714,14 @@ fun SettingsScreen(
                     }
                 )
 
+                // Disclaimer
+                SettingClickableItem(
+                    icon = Icons.Default.Warning,
+                    title = "Disclaimer",
+                    subtitle = "Important notice regarding app usage",
+                    onClick = { showDisclaimerDialog = true }
+                )
+
                 // Privacy Policy
                 SettingClickableItem(
                     icon = Icons.Default.Security,
@@ -807,3 +821,34 @@ private fun SettingSwitchItem(
     }
 }
 
+
+@Composable
+fun DisclaimerDialog(onDismiss: () -> Unit) {
+    val colors = AppTheme.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Disclaimer",
+                style = MaterialTheme.typography.titleLarge,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Text(
+                text = "If anyone downloads any immoral or sinful content using this app, the burden of that sin rests solely on the user; the developer shall bear no responsibility. However, if the app is used for righteous or rewarding purposes, a portion of that reward (Sawab) will be credited to the developer.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary,
+                lineHeight = 22.sp
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("I Understand", color = colors.primary, fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = colors.surface,
+        shape = RoundedCornerShape(24.dp)
+    )
+}
