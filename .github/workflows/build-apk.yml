@@ -111,6 +111,40 @@ jobs:
           echo "✓ Verified Universal APK: Download-Master-universal-release.apk ($(du -h "$DEST_APK" | cut -f1))"
           
           echo "asset_dir=$TEMP_ASSET_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Verify APK Release Signature
+        run: |
+          echo "=== Verifying Packaged Release APK Signature ==="
+          ASSET_DIR="${{ steps.prepare_assets.outputs.asset_dir }}"
+          APK_FILE="$ASSET_DIR/Download-Master-universal-release.apk"
+
+          if [ ! -f "$APK_FILE" ] || [ ! -s "$APK_FILE" ]; then
+            echo "ERROR: Packaged universal release APK not found at $APK_FILE"
+            exit 1
+          fi
+
+          if [ -z "$ANDROID_HOME" ] || [ ! -d "$ANDROID_HOME/build-tools" ]; then
+            echo "ERROR: ANDROID_HOME/build-tools directory not found (ANDROID_HOME='$ANDROID_HOME')."
+            exit 1
+          fi
+
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" -type f | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "ERROR: apksigner executable not found under $ANDROID_HOME/build-tools."
+            exit 1
+          fi
+
+          echo "Using apksigner: $APKSIGNER"
+          CERT_OUTPUT=$("$APKSIGNER" verify --print-certs "$APK_FILE")
+          echo "$CERT_OUTPUT"
+
+          if echo "$CERT_OUTPUT" | grep -q "CN=Android Debug"; then
+            echo "ERROR: Release APK is signed with a debug certificate (CN=Android Debug)! Failing build."
+            exit 1
+          fi
+
+          echo "✓ Release APK signature verified (non-debug certificate)."
+
       - name: Publish Release Assets to GitHub Releases
         id: publish_release
         env:
