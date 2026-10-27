@@ -107,7 +107,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val useWifiOnly = MutableStateFlow(prefs.getBoolean(KEY_USE_WIFI_ONLY, false))
     val maxConcurrentDownloads = MutableStateFlow(prefs.getInt(KEY_MAX_CONCURRENT, 3))
     val defaultQualityPreference = MutableStateFlow(prefs.getString(KEY_DEFAULT_QUALITY, "Ask Each Time") ?: "Ask Each Time")
-    val downloadLocation = MutableStateFlow(prefs.getString(KEY_DOWNLOAD_PATH, "Internal Storage/Download/DownloadMaster") ?: "Internal Storage/Download/DownloadMaster")
+    val downloadLocation = MutableStateFlow(
+        repository.resolveValidDownloadLocationSetting(
+            prefs.getString(KEY_DOWNLOAD_PATH, YtDlpRepository.DEFAULT_DOWNLOAD_LOCATION)
+        )
+    )
     val customArguments = MutableStateFlow("")
 
     // Active & Completed Downloads Tracking
@@ -130,6 +134,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val bookmarks: StateFlow<List<BookmarkItem>> = _bookmarks.asStateFlow()
 
     init {
+        val rawSavedLocation = prefs.getString(KEY_DOWNLOAD_PATH, null)
+        if (rawSavedLocation != null && rawSavedLocation != downloadLocation.value) {
+            prefs.edit().putString(KEY_DOWNLOAD_PATH, downloadLocation.value).apply()
+        }
         loadHistory()
         loadBookmarks()
         observeServiceEvents()
@@ -159,6 +167,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val current = activeDownloads.value[event.id]
                         if (current != null) {
                             activeDownloads.value = activeDownloads.value + (event.id to current.copy(progress = event.progress, isPaused = event.isPaused))
+                        }
+                        val currentUi = _uiState.value
+                        if (currentUi is DownloadUiState.Downloading) {
+                            _uiState.value = currentUi.copy(progress = event.progress)
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Completed -> {
@@ -318,6 +330,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setUseWifiOnly(enabled: Boolean) {
         useWifiOnly.value = enabled
         prefs.edit().putBoolean(KEY_USE_WIFI_ONLY, enabled).apply()
+        DownloadForegroundService.onWifiOnlySettingChanged(getApplication())
     }
 
     fun setMaxConcurrentDownloads(count: Int) {
@@ -331,8 +344,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setDownloadLocation(path: String) {
-        downloadLocation.value = path
-        prefs.edit().putString(KEY_DOWNLOAD_PATH, path).apply()
+        val resolvedPath = repository.resolveValidDownloadLocationSetting(path)
+        downloadLocation.value = resolvedPath
+        prefs.edit().putString(KEY_DOWNLOAD_PATH, resolvedPath).apply()
     }
 
     fun getCookiesContent(): String = repository.getCookiesContent()
@@ -360,7 +374,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun isVideoLink(url: String): Boolean {
-        val lower = url.lowercase()
+        val lower = url.lowercase().trim()
         return lower.contains("youtube.com/watch") ||
                 lower.contains("youtu.be/") ||
                 lower.contains("youtube.com/shorts") ||
@@ -372,7 +386,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 lower.contains("vimeo.com/") ||
                 lower.contains("dailymotion.com/video") ||
                 lower.contains("twitter.com/") ||
-                lower.contains("x.com/")
+                lower.contains("x.com/") ||
+                isSoundCloudMediaLink(lower) ||
+                isRedditMediaLink(lower) ||
+                isPinterestPinLink(lower) ||
+                isTumblrPostLink(lower) ||
+                isLikeeVideoLink(lower)
+    }
+
+    private fun isSoundCloudMediaLink(lowerUrl: String): Boolean {
+        if (Regex("""^https?://on\.soundcloud\.com/[a-z0-9_-]+""").containsMatchIn(lowerUrl)) {
+            return true
+        }
+        val reservedPaths = "(?:discover|stream|search|you|settings|upload|messages|notifications|charts|pages|terms|imprint|popular|tags|signin|login|logout|pro|go|feed|stations|people)"
+        return Regex("""^https?://(?:(?:www|m)\.)?soundcloud\.com/(?!$reservedPaths(?:/|$|[?#]))[a-z0-9_-]+/(?:sets/[a-z0-9_-]+|[a-z0-9_-]+)""").containsMatchIn(lowerUrl)
+    }
+
+    private fun isRedditMediaLink(lowerUrl: String): Boolean {
+        return Regex("""^https?://(?:[a-z0-9-]+\.)?reddit\.com/(?:r/[a-z0-9_]+/(?:comments|s)/[a-z0-9]+|user/[a-z0-9_-]+/comments/[a-z0-9]+|comments/[a-z0-9]+)""").containsMatchIn(lowerUrl) ||
+                Regex("""^https?://v\.redd\.it/[a-z0-9]+""").containsMatchIn(lowerUrl)
+    }
+
+    private fun isPinterestPinLink(lowerUrl: String): Boolean {
+        return Regex("""^https?://(?:[a-z0-9-]+\.)?pinterest\.[a-z.]+/pin/[a-z0-9_-]+""").containsMatchIn(lowerUrl) ||
+                Regex("""^https?://pin\.it/[a-z0-9_-]+""").containsMatchIn(lowerUrl)
+    }
+
+    private fun isTumblrPostLink(lowerUrl: String): Boolean {
+        val reservedPaths = "(?:dashboard|explore|search|login|register|settings|inbox|likes|following|blog|tagged|policy|privacy|about|apps|help)"
+        return Regex("""^https?://(?:[a-z0-9-]+\.)?tumblr\.com/(?:post/\d+|video/[^/?#]+/\d+|(?!$reservedPaths(?:/|$))[a-z0-9-]+/\d+)""").containsMatchIn(lowerUrl)
+    }
+
+    private fun isLikeeVideoLink(lowerUrl: String): Boolean {
+        return Regex("""^https?://(?:[a-z0-9-]+\.)?likee\.video/(?:@[^/?#]+/video/[a-z0-9_-]+|[^/?#]+/video/[a-z0-9_-]+|(?:v|s|video)/[a-z0-9_-]+)""").containsMatchIn(lowerUrl)
     }
 
     fun addBookmark(title: String, url: String) {
@@ -450,7 +496,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             embedThumbnail = embedThumbnail.value,
             embedMetadata = embedMetadata.value,
             useAria2c = useAria2c.value,
-            customArguments = customArguments.value
+            customArguments = customArguments.value,
+            outputDir = downloadLocation.value
         )
     }
 

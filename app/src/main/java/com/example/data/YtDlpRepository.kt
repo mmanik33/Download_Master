@@ -34,6 +34,10 @@ class YtDlpRepository(private val context: Context) {
     companion object {
         private const val TAG = "YtDlpRepository"
         const val DOWNLOADS_SUBDIR = "DownloadMaster"
+        const val DEFAULT_DOWNLOAD_LOCATION = "Internal Storage/Download/DownloadMaster"
+        private const val DEFAULT_MEDIASTORE_RELATIVE_PATH = "Download/DownloadMaster"
+        private const val PREFS_NAME = "download_master_prefs"
+        private const val KEY_DOWNLOAD_PATH = "key_download_path"
         private val metadataCache = LruCache<String, MediaModel>(50)
     }
 
@@ -272,7 +276,12 @@ class YtDlpRepository(private val context: Context) {
                     
                     val actualHdPlayUrl = if (hdPlayUrl != null && hdPlayUrl != playUrl) hdPlayUrl else null
                     val musicUrl = data.optString("music").takeIf { it.isNotBlank() }
-                    val size = data.optLong("size", 0L)
+                    val size = data.optLong("size", 0L).coerceAtLeast(0L)
+                    val hdSize = data.optLong("hd_size", 0L).coerceAtLeast(0L)
+                    val apiWidth = data.optInt("width", 0).coerceAtLeast(0)
+                    val apiHeight = data.optInt("height", 0).coerceAtLeast(0)
+                    val hdWidth = data.optInt("hd_width", 0).coerceAtLeast(0)
+                    val hdHeight = data.optInt("hd_height", 0).coerceAtLeast(0)
 
                     val authorObj = data.optJSONObject("author")
                     val nickname = authorObj?.optString("nickname") ?: "TikTok Creator"
@@ -282,14 +291,16 @@ class YtDlpRepository(private val context: Context) {
 
                     // HD format
                     if (!actualHdPlayUrl.isNullOrBlank()) {
+                        val hasHdDims = hdWidth > 0 && hdHeight > 0
+                        val hdRes = if (hasHdDims) "${minOf(hdWidth, hdHeight)}p (HD)" else "HD No Watermark"
                         formats.add(
                             FormatModel(
                                 formatId = "tik_hd",
                                 ext = "mp4",
-                                resolution = "1080p (HD)",
-                                width = 1080,
-                                height = 1920,
-                                fileSize = if (size > 0) (size * 1.5).toLong() else 0L,
+                                resolution = hdRes,
+                                width = if (hasHdDims) hdWidth else 0,
+                                height = if (hasHdDims) hdHeight else 0,
+                                fileSize = hdSize,
                                 formatNote = "HD No Watermark",
                                 isVideo = true,
                                 isAudioOnly = false,
@@ -300,14 +311,16 @@ class YtDlpRepository(private val context: Context) {
 
                     // Standard format
                     if (!playUrl.isNullOrBlank()) {
+                        val hasSdDims = apiWidth > 0 && apiHeight > 0
+                        val sdRes = if (hasSdDims) "${minOf(apiWidth, apiHeight)}p" else "Standard No Watermark"
                         formats.add(
                             FormatModel(
                                 formatId = "tik_sd",
                                 ext = "mp4",
-                                resolution = "720p",
-                                width = 720,
-                                height = 1280,
-                                fileSize = if (size > 0) (size * 0.8).toLong() else 0L,
+                                resolution = sdRes,
+                                width = if (hasSdDims) apiWidth else 0,
+                                height = if (hasSdDims) apiHeight else 0,
+                                fileSize = size,
                                 formatNote = "Standard No Watermark",
                                 isVideo = true,
                                 isAudioOnly = false,
@@ -411,7 +424,7 @@ class YtDlpRepository(private val context: Context) {
                         }
                         if (targetFile.exists() && targetFile.length() > 0L && !hasIncompleteExtension(targetFile.name)) {
                             verifyDownloadedMedia(targetFile)
-                            val finalFile = finalizeDownloadedFile(targetFile)
+                            val finalFile = finalizeDownloadedFile(targetFile, config.outputDir)
                             return@withContext Result.success(finalFile)
                         } else {
                             if (targetFile.exists()) targetFile.delete()
@@ -599,7 +612,7 @@ class YtDlpRepository(private val context: Context) {
                     ?: throw IllegalStateException("Download finished without producing a verified media file")
 
                 verifyDownloadedMedia(newFile)
-                val finalFile = finalizeDownloadedFile(newFile)
+                val finalFile = finalizeDownloadedFile(newFile, config.outputDir)
                 return@withContext Result.success(finalFile)
             } catch (e: Exception) {
                 Log.w(TAG, "Download strategy $index failed for ${config.url}: ${e.message}")
@@ -966,12 +979,122 @@ class YtDlpRepository(private val context: Context) {
         }
     }
 
-    fun getDownloadDirectory(): File {
+    private fun getSavedDownloadLocation(): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_DOWNLOAD_PATH, DEFAULT_DOWNLOAD_LOCATION) ?: DEFAULT_DOWNLOAD_LOCATION
+    }
+
+    /**
+     * Parses a user/saved download location into a relative path under public Downloads
+     * (e.g. "Download/DownloadMaster" or "Download/CustomFolder"), or returns null if the
+     * path is outside public Downloads or contains invalid path segments.
+     */
+    private fun parseDownloadsRelativePath(rawPath: String?): String? {
+        val trimmed = rawPath?.trim() ?: return DEFAULT_MEDIASTORE_RELATIVE_PATH
+        if (trimmed.isEmpty()) return DEFAULT_MEDIASTORE_RELATIVE_PATH
+        if (trimmed.contains('\u0000')) return null
+
+        val normalized = trimmed.replace('\\', '/')
+        if (normalized.split('/').any { it == ".." || it == "." }) {
+            return null
+        }
+
+        val externalRoot = try {
+            Environment.getExternalStorageDirectory().absolutePath.replace('\\', '/').trimEnd('/')
+        } catch (_: Exception) {
+            "/storage/emulated/0"
+        }
+
+        val withoutPrefix = when {
+            normalized.startsWith("Internal Storage/", ignoreCase = true) ->
+                normalized.substring("Internal Storage/".length)
+            normalized.equals("Internal Storage", ignoreCase = true) ->
+                ""
+            normalized.startsWith("$externalRoot/") ->
+                normalized.substring(externalRoot.length + 1)
+            normalized.startsWith("/storage/emulated/0/") ->
+                normalized.substring("/storage/emulated/0/".length)
+            normalized.startsWith("/sdcard/") ->
+                normalized.substring("/sdcard/".length)
+            normalized.startsWith("/") ->
+                return null
+            else -> normalized
+        }.trim('/')
+
+        if (withoutPrefix.isEmpty()) return null
+
+        val relativeToDownloads = when {
+            withoutPrefix.equals(Environment.DIRECTORY_DOWNLOADS, ignoreCase = true) ->
+                Environment.DIRECTORY_DOWNLOADS
+            withoutPrefix.startsWith("${Environment.DIRECTORY_DOWNLOADS}/", ignoreCase = true) -> {
+                val sub = withoutPrefix.substring(Environment.DIRECTORY_DOWNLOADS.length + 1).trim('/')
+                if (sub.isEmpty()) Environment.DIRECTORY_DOWNLOADS else "${Environment.DIRECTORY_DOWNLOADS}/$sub"
+            }
+            !withoutPrefix.contains('/') ->
+                "${Environment.DIRECTORY_DOWNLOADS}/$withoutPrefix"
+            else -> return null
+        }
+
+        val segments = relativeToDownloads.split('/')
+        if (segments.isEmpty() || !segments.first().equals(Environment.DIRECTORY_DOWNLOADS, ignoreCase = true)) {
+            return null
+        }
+        val illegalChars = Regex("""[:*?"<>|]""")
+        for (segment in segments) {
+            if (segment.isBlank() || illegalChars.containsMatchIn(segment)) {
+                return null
+            }
+        }
+        return segments.joinToString("/")
+    }
+
+    /**
+     * Validates a candidate download location setting and returns a usable location string.
+     * If the candidate is invalid or not usable under scoped storage, logs a fallback warning
+     * and resolves to DEFAULT_DOWNLOAD_LOCATION ("Internal Storage/Download/DownloadMaster").
+     */
+    fun resolveValidDownloadLocationSetting(rawPath: String?): String {
+        val candidate = rawPath?.trim()
+        if (candidate.isNullOrBlank()) {
+            return DEFAULT_DOWNLOAD_LOCATION
+        }
+        val relativePath = parseDownloadsRelativePath(candidate)
+        if (relativePath == null) {
+            Log.w(TAG, "Download location '$candidate' is invalid or outside scoped-storage Downloads; falling back to default '$DEFAULT_DOWNLOAD_LOCATION'")
+            return DEFAULT_DOWNLOAD_LOCATION
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val targetDir = File(Environment.getExternalStorageDirectory(), relativePath)
+            if (!((targetDir.exists() || targetDir.mkdirs()) && canWriteToDirectory(targetDir))) {
+                Log.w(TAG, "Download location '$candidate' (${targetDir.absolutePath}) is not writable; falling back to default '$DEFAULT_DOWNLOAD_LOCATION'")
+                return DEFAULT_DOWNLOAD_LOCATION
+            }
+        }
+        return "Internal Storage/$relativePath"
+    }
+
+    fun getDownloadDirectory(customPath: String? = null): File {
+        val requestedPath = customPath?.takeIf { it.isNotBlank() } ?: getSavedDownloadLocation()
+        val relativePath = parseDownloadsRelativePath(requestedPath)
+
+        if (relativePath != null) {
+            val customDir = File(Environment.getExternalStorageDirectory(), relativePath)
+            if ((customDir.exists() || customDir.mkdirs()) && canWriteToDirectory(customDir)) {
+                return customDir
+            }
+            if (relativePath != DEFAULT_MEDIASTORE_RELATIVE_PATH) {
+                Log.w(TAG, "Configured download location '$requestedPath' (${customDir.absolutePath}) is not writable/usable; falling back to default Download/$DOWNLOADS_SUBDIR")
+            }
+        } else {
+            Log.w(TAG, "Configured download location '$requestedPath' is invalid under scoped storage; falling back to default Download/$DOWNLOADS_SUBDIR")
+        }
+
         val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val dmDir = File(publicDir, DOWNLOADS_SUBDIR)
         return if ((dmDir.exists() || dmDir.mkdirs()) && canWriteToDirectory(dmDir)) {
             dmDir
         } else {
+            Log.w(TAG, "Default public Download/$DOWNLOADS_SUBDIR not directly writable via File; using app-private DownloadMaster directory")
             val fallbackBase = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
             File(fallbackBase, DOWNLOADS_SUBDIR).apply {
                 if (!exists()) mkdirs()
@@ -979,27 +1102,43 @@ class YtDlpRepository(private val context: Context) {
         }
     }
 
-    private fun finalizeDownloadedFile(sourceFile: File): File {
+    private fun finalizeDownloadedFile(sourceFile: File, customOutputDir: String? = null): File {
         val sourceSize = sourceFile.length()
         if (sourceSize <= 0L || !sourceFile.exists()) {
             throw IllegalStateException("Cannot finalize missing or empty file: ${sourceFile.name}")
         }
 
+        val requestedPath = customOutputDir?.takeIf { it.isNotBlank() } ?: getSavedDownloadLocation()
+        val parsedRelativePath = parseDownloadsRelativePath(requestedPath)
+        val effectiveRelativePath = if (parsedRelativePath != null) {
+            parsedRelativePath
+        } else {
+            Log.w(TAG, "Saved download location '$requestedPath' is not usable under scoped storage; falling back to default $DEFAULT_MEDIASTORE_RELATIVE_PATH")
+            DEFAULT_MEDIASTORE_RELATIVE_PATH
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val mediaStoreFile = saveToMediaStoreDownloads(sourceFile, sourceSize)
+            var mediaStoreFile = saveToMediaStoreDownloads(sourceFile, sourceSize, effectiveRelativePath)
+            if (mediaStoreFile == null && effectiveRelativePath != DEFAULT_MEDIASTORE_RELATIVE_PATH) {
+                Log.w(TAG, "MediaStore write to '$effectiveRelativePath' failed; falling back to default $DEFAULT_MEDIASTORE_RELATIVE_PATH")
+                mediaStoreFile = saveToMediaStoreDownloads(sourceFile, sourceSize, DEFAULT_MEDIASTORE_RELATIVE_PATH)
+            }
             if (mediaStoreFile != null) {
                 return mediaStoreFile
             }
         }
 
-        return moveFileToFallbackDirectory(sourceFile, sourceSize)
+        return moveFileToFallbackDirectory(sourceFile, sourceSize, requestedPath)
     }
 
-    private fun saveToMediaStoreDownloads(sourceFile: File, expectedSize: Long): File? {
+    private fun saveToMediaStoreDownloads(
+        sourceFile: File,
+        expectedSize: Long,
+        relativePath: String = DEFAULT_MEDIASTORE_RELATIVE_PATH
+    ): File? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val resolver = context.contentResolver
         val mimeType = resolveMimeType(sourceFile)
-        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$DOWNLOADS_SUBDIR"
 
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.name)
@@ -1055,8 +1194,7 @@ class YtDlpRepository(private val context: Context) {
             val targetPath = if (!finalPath.isNullOrBlank()) {
                 finalPath!!
             } else {
-                val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                File(File(publicDownloads, DOWNLOADS_SUBDIR), displayName).absolutePath
+                File(File(Environment.getExternalStorageDirectory(), relativePath), displayName).absolutePath
             }
 
             sourceFile.delete()
@@ -1096,8 +1234,12 @@ class YtDlpRepository(private val context: Context) {
         }
     }
 
-    private fun moveFileToFallbackDirectory(sourceFile: File, expectedSize: Long): File {
-        val destDir = getDownloadDirectory()
+    private fun moveFileToFallbackDirectory(
+        sourceFile: File,
+        expectedSize: Long,
+        customOutputDir: String? = null
+    ): File {
+        val destDir = getDownloadDirectory(customOutputDir)
         if (!destDir.exists()) {
             destDir.mkdirs()
         }

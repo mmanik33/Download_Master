@@ -492,13 +492,23 @@ fun DownloadsScreen(
             // 1. Active Downloading Card (shown in All or Downloading tabs)
             if (selectedTab == 0 || selectedTab == 1) {
                 items(activeDownloads.values.toList(), key = { it.processId }) { downloadingState ->
+                    val isWaitingForWifi = downloadingState.progress.speedText == "Waiting for Wi-Fi" ||
+                        downloadingState.progress.lineText == "Waiting for Wi-Fi"
                     ActiveDownloadCard(
                         title = downloadingState.mediaInfo.title,
                         thumbnailUrl = downloadingState.mediaInfo.thumbnailUrl,
                         qualityTag = if (downloadingState.config.isAudioOnly) downloadingState.config.audioFormat.name else downloadingState.config.videoQuality.label,
                         progressPercent = downloadingState.progress.progressPercent.toInt(),
-                        progressText = if (downloadingState.isPaused) "Paused • Tap play to resume" else downloadingState.progress.lineText.ifBlank { "${downloadingState.progress.progressPercent.toInt()}%" },
-                        speedText = if (downloadingState.isPaused) "Paused" else downloadingState.progress.speedText,
+                        progressText = when {
+                            isWaitingForWifi -> "Waiting for Wi-Fi"
+                            downloadingState.isPaused -> "Paused • Tap play to resume"
+                            else -> downloadingState.progress.lineText.ifBlank { "${downloadingState.progress.progressPercent.toInt()}%" }
+                        },
+                        speedText = when {
+                            isWaitingForWifi -> "Waiting for Wi-Fi"
+                            downloadingState.isPaused -> "Paused"
+                            else -> downloadingState.progress.speedText
+                        },
                         stageText = if (downloadingState.isPaused) "PAUSED" else downloadingState.progress.stage.name,
                         isPaused = downloadingState.isPaused,
                         onPauseResume = { viewModel.togglePauseResumeDownload(downloadingState.processId) },
@@ -645,7 +655,11 @@ private fun ActiveDownloadCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isPaused) "Paused • Tap play to resume" else "$speedText • $stageText",
+                        text = when {
+                            speedText == "Waiting for Wi-Fi" -> "Waiting for Wi-Fi"
+                            isPaused -> "Paused • Tap play to resume"
+                            else -> "$speedText • $stageText"
+                        },
                         color = if (isPaused) Color(0xFFF59E0B) else AccentCyan,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
@@ -725,6 +739,7 @@ private fun ActiveDownloadCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val cleanStatus = when {
+                    speedText == "Waiting for Wi-Fi" -> "Waiting for Wi-Fi"
                     isPaused -> "Paused • Tap play to resume"
                     progressPercent <= 0 -> "Preparing download engine..."
                     stageText.contains("MERG", ignoreCase = true) -> "Merging video & audio..."

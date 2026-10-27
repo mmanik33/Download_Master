@@ -6,6 +6,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -23,6 +27,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 class DownloadForegroundService : Service() {
 
@@ -35,6 +40,7 @@ class DownloadForegroundService : Service() {
         const val ACTION_CANCEL_DOWNLOAD = "action_cancel_download"
         const val ACTION_PAUSE_DOWNLOAD = "action_pause_download"
         const val ACTION_RESUME_DOWNLOAD = "action_resume_download"
+        const val ACTION_WIFI_SETTING_CHANGED = "action_wifi_setting_changed"
 
         const val EXTRA_URL = "extra_url"
         const val EXTRA_TITLE = "extra_title"
@@ -46,7 +52,14 @@ class DownloadForegroundService : Service() {
         const val EXTRA_EMBED_METADATA = "extra_embed_metadata"
         const val EXTRA_USE_ARIA2C = "extra_use_aria2c"
         const val EXTRA_CUSTOM_ARGS = "extra_custom_args"
+        const val EXTRA_OUTPUT_DIR = "extra_output_dir"
         const val EXTRA_PROCESS_ID = "extra_process_id"
+
+        const val STATUS_WAITING_FOR_WIFI = "Waiting for Wi-Fi"
+        private const val PREFS_NAME = "download_master_prefs"
+        private const val KEY_USE_WIFI_ONLY = "key_use_wifi_only"
+
+        private val hasActiveDownloads = AtomicBoolean(false)
 
         private val _downloadEvents = MutableSharedFlow<DownloadEvent>(extraBufferCapacity = 50)
         val downloadEvents: SharedFlow<DownloadEvent> = _downloadEvents.asSharedFlow()
@@ -65,6 +78,7 @@ class DownloadForegroundService : Service() {
                 putExtra(EXTRA_EMBED_METADATA, config.embedMetadata)
                 putExtra(EXTRA_USE_ARIA2C, config.useAria2c)
                 putExtra(EXTRA_CUSTOM_ARGS, config.customArguments)
+                putExtra(EXTRA_OUTPUT_DIR, config.outputDir)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -88,6 +102,18 @@ class DownloadForegroundService : Service() {
             }
             context.startService(intent)
         }
+
+        fun onWifiOnlySettingChanged(context: Context) {
+            if (!hasActiveDownloads.get()) return
+            try {
+                val intent = Intent(context, DownloadForegroundService::class.java).apply {
+                    action = ACTION_WIFI_SETTING_CHANGED
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Unable to notify service of Wi-Fi setting change: ${e.message}")
+            }
+        }
     }
 
     sealed interface DownloadEvent {
@@ -108,10 +134,14 @@ class DownloadForegroundService : Service() {
         val config: DownloadConfig,
         var job: Job? = null,
         var isPaused: Boolean = false,
+        var isWaitingForWifi: Boolean = false,
+        var hasEmittedStarted: Boolean = false,
         var progress: DownloadProgress = DownloadProgress(stage = DownloadStage.QUEUED)
     )
 
     private val activeJobs = ConcurrentHashMap<String, ActiveJobState>()
+    private val wifiCallbackLock = Any()
+    private var wifiNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -120,6 +150,127 @@ class DownloadForegroundService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun isWifiOnlyEnabled(): Boolean {
+        val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_USE_WIFI_ONLY, false)
+    }
+
+    private fun isWifiConnected(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val activeNetwork = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun putJobInWaitingForWifi(jobState: ActiveJobState) {
+        Log.i(TAG, "Wi-Fi only is ON and active network is not Wi-Fi; placing ${jobState.processId} in '$STATUS_WAITING_FOR_WIFI'")
+        jobState.isPaused = true
+        jobState.isWaitingForWifi = true
+        repository.cancelDownload(jobState.processId)
+        jobState.job?.cancel()
+
+        val waitingProgress = jobState.progress.copy(
+            speedText = STATUS_WAITING_FOR_WIFI,
+            lineText = STATUS_WAITING_FOR_WIFI,
+            stage = DownloadStage.PAUSED,
+            isPaused = true
+        )
+        jobState.progress = waitingProgress
+
+        serviceScope.launch {
+            if (!jobState.hasEmittedStarted) {
+                jobState.hasEmittedStarted = true
+                _downloadEvents.emit(DownloadEvent.Started(jobState.processId, jobState.config.title, jobState.config))
+            }
+            _downloadEvents.emit(DownloadEvent.Progress(jobState.processId, waitingProgress, true))
+        }
+
+        updateForegroundState()
+        syncWifiCallbackRegistration()
+    }
+
+    private fun syncWifiCallbackRegistration() {
+        synchronized(wifiCallbackLock) {
+            val hasWaitingJobs = activeJobs.values.any { it.isWaitingForWifi }
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            if (hasWaitingJobs && wifiNetworkCallback == null) {
+                val callback = object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        val caps = cm.getNetworkCapabilities(network)
+                        val isWifi = (caps != null &&
+                            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) || isWifiConnected()
+                        if (isWifi) {
+                            resumeAllWifiWaitingJobs()
+                        }
+                    }
+
+                    override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                        if (networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                            networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        ) {
+                            resumeAllWifiWaitingJobs()
+                        }
+                    }
+
+                    override fun onLost(network: Network) {
+                        if (isWifiOnlyEnabled() && !isWifiConnected()) {
+                            activeJobs.values.filter { !it.isPaused }.forEach { runningJob ->
+                                putJobInWaitingForWifi(runningJob)
+                            }
+                        }
+                    }
+                }
+                val request = NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                try {
+                    cm.registerNetworkCallback(request, callback)
+                    wifiNetworkCallback = callback
+                    Log.i(TAG, "Registered Wi-Fi NetworkCallback while Wi-Fi-waiting download exists")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to register Wi-Fi NetworkCallback", e)
+                }
+            } else if (!hasWaitingJobs && wifiNetworkCallback != null) {
+                try {
+                    cm.unregisterNetworkCallback(wifiNetworkCallback!!)
+                    Log.i(TAG, "Unregistered Wi-Fi NetworkCallback (no Wi-Fi-waiting downloads remain)")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to unregister Wi-Fi NetworkCallback", e)
+                } finally {
+                    wifiNetworkCallback = null
+                }
+            }
+        }
+    }
+
+    private fun resumeAllWifiWaitingJobs() {
+        if (isWifiOnlyEnabled() && !isWifiConnected()) return
+        val waitingJobs = activeJobs.values.filter { it.isWaitingForWifi }
+        if (waitingJobs.isEmpty()) {
+            syncWifiCallbackRegistration()
+            return
+        }
+        Log.i(TAG, "Wi-Fi network available; automatically resuming ${waitingJobs.size} waiting download(s)")
+        for (jobState in waitingJobs) {
+            jobState.isWaitingForWifi = false
+            jobState.isPaused = false
+            val resumedProgress = jobState.progress.copy(
+                speedText = "Resuming...",
+                lineText = "Resuming...",
+                stage = DownloadStage.DOWNLOADING,
+                isPaused = false
+            )
+            jobState.progress = resumedProgress
+            serviceScope.launch { _downloadEvents.emit(DownloadEvent.Progress(jobState.processId, resumedProgress, false)) }
+            performDownload(jobState, isResume = true)
+        }
+        updateForegroundState()
+        syncWifiCallbackRegistration()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -135,6 +286,7 @@ class DownloadForegroundService : Service() {
                 val embedMetadata = intent.getBooleanExtra(EXTRA_EMBED_METADATA, true)
                 val useAria2c = intent.getBooleanExtra(EXTRA_USE_ARIA2C, true)
                 val customArgs = intent.getStringExtra(EXTRA_CUSTOM_ARGS) ?: ""
+                val outputDir = intent.getStringExtra(EXTRA_OUTPUT_DIR) ?: ""
 
                 val config = DownloadConfig(
                     url = url,
@@ -146,14 +298,20 @@ class DownloadForegroundService : Service() {
                     embedThumbnail = embedThumbnail,
                     embedMetadata = embedMetadata,
                     useAria2c = useAria2c,
-                    customArguments = customArgs
+                    customArguments = customArgs,
+                    outputDir = outputDir
                 )
                 
                 val jobState = ActiveJobState(processId, config)
                 activeJobs[processId] = jobState
+                hasActiveDownloads.set(true)
                 
                 updateForegroundState()
-                performDownload(jobState)
+                if (isWifiOnlyEnabled() && !isWifiConnected()) {
+                    putJobInWaitingForWifi(jobState)
+                } else {
+                    performDownload(jobState)
+                }
             }
             ACTION_TOGGLE_PAUSE -> {
                 val processId = intent.getStringExtra(EXTRA_PROCESS_ID) ?: return START_NOT_STICKY
@@ -168,12 +326,22 @@ class DownloadForegroundService : Service() {
                 val processId = intent.getStringExtra(EXTRA_PROCESS_ID) ?: return START_NOT_STICKY
                 handleCancellation(processId)
             }
+            ACTION_WIFI_SETTING_CHANGED -> {
+                if (isWifiOnlyEnabled() && !isWifiConnected()) {
+                    activeJobs.values.filter { !it.isPaused }.forEach { jobState ->
+                        putJobInWaitingForWifi(jobState)
+                    }
+                } else if (!isWifiOnlyEnabled()) {
+                    resumeAllWifiWaitingJobs()
+                }
+            }
         }
         return START_NOT_STICKY
     }
 
     private fun handlePause(jobState: ActiveJobState) {
         Log.i(TAG, "Pausing download process: ${jobState.processId}")
+        jobState.isWaitingForWifi = false
         jobState.isPaused = true
         repository.cancelDownload(jobState.processId) // Force interrupt yt-dlp to 'pause'
         val pausedProgress = jobState.progress.copy(
@@ -184,11 +352,19 @@ class DownloadForegroundService : Service() {
         jobState.progress = pausedProgress
         serviceScope.launch { _downloadEvents.emit(DownloadEvent.Progress(jobState.processId, pausedProgress, true)) }
         updateForegroundState()
+        syncWifiCallbackRegistration()
     }
 
     private fun handleResume(jobState: ActiveJobState) {
+        if (isWifiOnlyEnabled() && !isWifiConnected()) {
+            Log.i(TAG, "Cannot resume ${jobState.processId}: Wi-Fi only is ON and active network is not Wi-Fi")
+            putJobInWaitingForWifi(jobState)
+            return
+        }
         Log.i(TAG, "Resuming download process: ${jobState.processId}")
+        jobState.isWaitingForWifi = false
         jobState.isPaused = false
+        syncWifiCallbackRegistration()
         val resumedProgress = jobState.progress.copy(
             speedText = "Resuming...",
             stage = DownloadStage.DOWNLOADING,
@@ -201,6 +377,11 @@ class DownloadForegroundService : Service() {
     }
 
     private fun performDownload(jobState: ActiveJobState, isResume: Boolean = false) {
+        if (isWifiOnlyEnabled() && !isWifiConnected()) {
+            putJobInWaitingForWifi(jobState)
+            return
+        }
+
         jobState.job?.cancel()
         
         // Re-generate ID on resume for yt-dlp process
@@ -208,8 +389,14 @@ class DownloadForegroundService : Service() {
         repository.resetProcessState(effectiveProcessId)
 
         jobState.job = serviceScope.launch {
-            if (!isResume) {
+            if (!isResume && !jobState.hasEmittedStarted) {
+                jobState.hasEmittedStarted = true
                 _downloadEvents.emit(DownloadEvent.Started(jobState.processId, jobState.config.title, jobState.config))
+            }
+
+            if (isWifiOnlyEnabled() && !isWifiConnected()) {
+                putJobInWaitingForWifi(jobState)
+                return@launch
             }
             
             jobState.progress = jobState.progress.copy(
@@ -223,6 +410,10 @@ class DownloadForegroundService : Service() {
 
             val result = repository.downloadMedia(jobState.config, effectiveProcessId) { progressPercent, etaSeconds, line ->
                 if (jobState.isPaused) return@downloadMedia
+                if (isWifiOnlyEnabled() && !isWifiConnected()) {
+                    putJobInWaitingForWifi(jobState)
+                    return@downloadMedia
+                }
                 
                 val etaFormatted = if (etaSeconds > 0) {
                     val m = etaSeconds / 60
@@ -293,6 +484,7 @@ class DownloadForegroundService : Service() {
     private fun handleCancellation(processId: String) {
         val jobState = activeJobs[processId] ?: return
         Log.i(TAG, "Cancelling active download process: $processId")
+        jobState.isWaitingForWifi = false
         repository.cancelDownload(jobState.processId)
         jobState.job?.cancel()
         repository.cleanupIncompleteFiles()
@@ -302,6 +494,8 @@ class DownloadForegroundService : Service() {
     
     private fun removeJobAndCheckStop(processId: String) {
         activeJobs.remove(processId)
+        hasActiveDownloads.set(activeJobs.isNotEmpty())
+        syncWifiCallbackRegistration()
         updateForegroundState()
         if (activeJobs.isEmpty()) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -320,9 +514,18 @@ class DownloadForegroundService : Service() {
         
         val title = if (totalActive > 1) "Downloading $totalActive files" else firstJob.config.title
         val progressText = if (totalActive > 1) {
-            "${activeJobs.values.count { !it.isPaused }} active, ${activeJobs.values.count { it.isPaused }} paused"
+            val waitingCount = activeJobs.values.count { it.isWaitingForWifi }
+            if (waitingCount > 0) {
+                "$waitingCount waiting for Wi-Fi, ${activeJobs.values.count { !it.isPaused }} active"
+            } else {
+                "${activeJobs.values.count { !it.isPaused }} active, ${activeJobs.values.count { it.isPaused }} paused"
+            }
         } else {
-            if (firstJob.isPaused) "Paused" else "${firstJob.progress.progressPercent.toInt()}% • ${firstJob.progress.speedText}"
+            when {
+                firstJob.isWaitingForWifi || firstJob.progress.speedText == STATUS_WAITING_FOR_WIFI -> STATUS_WAITING_FOR_WIFI
+                firstJob.isPaused -> "Paused"
+                else -> "${firstJob.progress.progressPercent.toInt()}% • ${firstJob.progress.speedText}"
+            }
         }
         
         val progressVal = if (totalActive > 1) 0 else firstJob.progress.progressPercent.toInt()
@@ -394,7 +597,13 @@ class DownloadForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        activeJobs.values.forEach { it.job?.cancel() }
+        activeJobs.values.forEach {
+            it.isWaitingForWifi = false
+            it.job?.cancel()
+        }
         activeJobs.clear()
+        hasActiveDownloads.set(false)
+        syncWifiCallbackRegistration()
     }
 }
+
