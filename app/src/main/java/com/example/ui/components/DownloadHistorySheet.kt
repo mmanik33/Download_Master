@@ -160,8 +160,8 @@ fun HistoryItemRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val file = File(item.localFilePath)
-    val fileExists = file.exists()
+    val context = LocalContext.current
+    val fileExists = resolveHistoryMediaUri(context, item.localFilePath) != null
 
     Card(
         modifier = modifier
@@ -264,18 +264,73 @@ fun HistoryItemRow(
     }
 }
 
+private fun resolveHistoryMediaUri(context: Context, filePath: String): Uri? {
+    if (filePath.isBlank()) return null
+    if (filePath.startsWith("content://")) {
+        val uri = Uri.parse(filePath)
+        val exists = try {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
+        } catch (_: Exception) {
+            false
+        }
+        return if (exists) uri else null
+    }
+
+    val file = File(filePath)
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        val resolver = context.contentResolver
+        val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+        try {
+            resolver.query(
+                collection,
+                projection,
+                "${android.provider.MediaStore.MediaColumns.DATA} = ?",
+                arrayOf(filePath),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(0)
+                    return android.content.ContentUris.withAppendedId(collection, id)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        if (file.name.isNotBlank()) {
+            try {
+                resolver.query(
+                    collection,
+                    projection,
+                    "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                    arrayOf(file.name),
+                    "${android.provider.MediaStore.MediaColumns.DATE_ADDED} DESC"
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        return android.content.ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    if (file.exists()) {
+        return try {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } catch (_: Exception) {
+            Uri.fromFile(file)
+        }
+    }
+    return null
+}
+
 private fun openFileWithExternalApp(context: Context, filePath: String, isAudio: Boolean) {
     try {
-        val file = File(filePath)
-        if (!file.exists()) {
+        val uri = resolveHistoryMediaUri(context, filePath)
+        if (uri == null) {
             Toast.makeText(context, "File does not exist on disk", Toast.LENGTH_SHORT).show()
             return
-        }
-
-        val uri = try {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        } catch (e: Exception) {
-            Uri.fromFile(file)
         }
 
         val mimeType = if (isAudio) "audio/*" else "video/*"
@@ -291,14 +346,7 @@ private fun openFileWithExternalApp(context: Context, filePath: String, isAudio:
 
 private fun shareMediaFile(context: Context, filePath: String) {
     try {
-        val file = File(filePath)
-        if (!file.exists()) return
-
-        val uri = try {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        } catch (e: Exception) {
-            Uri.fromFile(file)
-        }
+        val uri = resolveHistoryMediaUri(context, filePath) ?: return
 
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "*/*"

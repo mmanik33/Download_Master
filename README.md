@@ -38,17 +38,18 @@ Native Android video & audio downloader application powered by embedded **yt-dlp
 
 ---
 
-## 🚀 Automated GitHub Actions Build (CI/CD)
+## 🚀 GitHub Actions Release Build (CI/CD)
 
-Whenever you push to GitHub or create a release tag, **GitHub Actions** will automatically build the APKs and attach them as downloadable artifacts:
+There are **no automatic builds on push**. Release APKs are built exclusively via manual workflow runs:
 
-1. **Push to `main` / `master`**:
-   - Runs unit tests
-   - Automatically builds `Download-Master-APKs` artifact (`app-debug.apk`) available under the **Actions** tab.
-2. **Release on Git Tag**:
-   - Tagging a version (e.g. `git tag v1.0.0 && git push origin v1.0.0`) automatically publishes a GitHub Release with the compiled APKs attached.
-3. **Manual Trigger**:
-   - Go to **Actions** -> **Build and Release Android APK** -> click **Run workflow**.
+1. **Configure Signing Secrets**:
+   - In your repository **Settings** -> **Secrets and variables** -> **Actions**, create:
+     - `KEYSTORE_BASE64`: Base64-encoded release keystore file (containing key alias `upload`).
+     - `STORE_PASSWORD`: Keystore password.
+     - `KEY_PASSWORD`: Key password for alias `upload`.
+2. **Run Manual Release Workflow**:
+   - Go to **Actions**, select **Build & Release Download Master**, and click **Run workflow**.
+   - The workflow decodes the release keystore to a temporary location, runs `:app:assembleRelease` to produce a signed universal release APK (`Download-Master-universal-release.apk`), and publishes it to **GitHub Releases**.
 
 ---
 

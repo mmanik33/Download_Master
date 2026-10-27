@@ -958,14 +958,74 @@ private fun EmptyDownloadsView(message: String = "No downloads yet") {
     }
 }
 
+private fun resolveMediaUri(context: Context, filePath: String): Uri? {
+    if (filePath.isBlank()) return null
+    if (filePath.startsWith("content://")) {
+        val uri = Uri.parse(filePath)
+        val exists = try {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
+        } catch (_: Exception) {
+            false
+        }
+        return if (exists) uri else null
+    }
+
+    val file = File(filePath)
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        val resolver = context.contentResolver
+        val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+        try {
+            resolver.query(
+                collection,
+                projection,
+                "${android.provider.MediaStore.MediaColumns.DATA} = ?",
+                arrayOf(filePath),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(0)
+                    return android.content.ContentUris.withAppendedId(collection, id)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        if (file.name.isNotBlank()) {
+            try {
+                resolver.query(
+                    collection,
+                    projection,
+                    "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                    arrayOf(file.name),
+                    "${android.provider.MediaStore.MediaColumns.DATE_ADDED} DESC"
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        return android.content.ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    if (file.exists()) {
+        return try {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } catch (_: Exception) {
+            Uri.fromFile(file)
+        }
+    }
+    return null
+}
+
 private fun openMediaFile(context: Context, filePath: String, isAudio: Boolean) {
     try {
-        val file = File(filePath)
-        if (!file.exists()) {
+        val uri = resolveMediaUri(context, filePath)
+        if (uri == null) {
             Toast.makeText(context, "File no longer exists on storage", Toast.LENGTH_SHORT).show()
             return
         }
-        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val mimeType = if (isAudio) "audio/*" else "video/*"
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeType)
@@ -979,12 +1039,11 @@ private fun openMediaFile(context: Context, filePath: String, isAudio: Boolean) 
 
 private fun shareMediaFile(context: Context, filePath: String) {
     try {
-        val file = File(filePath)
-        if (!file.exists()) {
+        val uri = resolveMediaUri(context, filePath)
+        if (uri == null) {
             Toast.makeText(context, "File does not exist", Toast.LENGTH_SHORT).show()
             return
         }
-        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "*/*"
             putExtra(Intent.EXTRA_STREAM, uri)

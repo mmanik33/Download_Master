@@ -1,10 +1,15 @@
 package com.example.data
 
+import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import android.util.LruCache
+import android.webkit.MimeTypeMap
 import com.example.model.AudioFormat
 import com.example.model.DownloadConfig
 import com.example.model.FormatModel
@@ -18,6 +23,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -360,9 +366,9 @@ class YtDlpRepository(private val context: Context) {
         processId: String,
         onProgress: (progress: Float, etaSeconds: Long, line: String) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
-        val downloadDir = getDownloadDirectory()
-        if (!downloadDir.exists()) {
-            downloadDir.mkdirs()
+        val workDir = getWorkDirectory()
+        if (!workDir.exists()) {
+            workDir.mkdirs()
         }
 
         val isTikTok = isTikTokUrl(config.url)
@@ -388,10 +394,10 @@ class YtDlpRepository(private val context: Context) {
                     val extension = if (config.isAudioOnly) config.audioFormat.ext else "mp4"
                     val qualityTag = if (config.isAudioOnly) config.audioFormat.name else "Video"
                     
-                    var targetFile = File(downloadDir, "${sanitizedTitle}_[${qualityTag}].$extension")
+                    var targetFile = File(workDir, "${sanitizedTitle}_[${qualityTag}].$extension")
                     var counter = 1
                     while (targetFile.exists()) {
-                        targetFile = File(downloadDir, "${sanitizedTitle}_[${qualityTag}]_$counter.$extension")
+                        targetFile = File(workDir, "${sanitizedTitle}_[${qualityTag}]_$counter.$extension")
                         counter++
                     }
                     
@@ -403,8 +409,13 @@ class YtDlpRepository(private val context: Context) {
                         if (finalPartFile.exists()) {
                             finalPartFile.renameTo(targetFile)
                         }
-                        scanMediaFile(targetFile)
-                        return@withContext Result.success(targetFile)
+                        if (targetFile.exists() && targetFile.length() > 0L && !hasIncompleteExtension(targetFile.name)) {
+                            verifyDownloadedMedia(targetFile)
+                            val finalFile = finalizeDownloadedFile(targetFile)
+                            return@withContext Result.success(finalFile)
+                        } else {
+                            if (targetFile.exists()) targetFile.delete()
+                        }
                     } else {
                         if (partFile.exists()) partFile.delete()
                     }
@@ -454,6 +465,7 @@ class YtDlpRepository(private val context: Context) {
         var lastException: Exception? = null
 
         for ((index, applyStrategy) in strategies.withIndex()) {
+            val tempDir = File(workDir, "temp_${processId}")
             try {
                 val request = YoutubeDLRequest(config.url)
                 applyStrategy(request)
@@ -479,8 +491,8 @@ class YtDlpRepository(private val context: Context) {
                 // Format output file template with quality indicator to prevent file collisions
                 val outputTemplate = "%(title).80B-%(id)s-[$qualityTag].%(ext)s"
                 request.addOption("-o", outputTemplate)
-                request.addOption("--paths", downloadDir.absolutePath)
-                request.addOption("--paths", "temp:${downloadDir.absolutePath}/temp_${processId}")
+                request.addOption("--paths", workDir.absolutePath)
+                request.addOption("--paths", "temp:${tempDir.absolutePath}")
 
                 // General performance and integrity options
                 request.addOption("--continue")
@@ -566,26 +578,29 @@ class YtDlpRepository(private val context: Context) {
 
                 Log.d(TAG, "Starting yt-dlp execution strategy $index for process: $processId")
 
-                val filesBefore = downloadDir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
+                val filesBefore = workDir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
 
                 YoutubeDL.getInstance().execute(request, processId) { progress, etaInSeconds, line ->
                     onProgress(progress, etaInSeconds, line)
                 }
 
-                File(downloadDir, "temp_${processId}").deleteRecursively()
+                tempDir.deleteRecursively()
 
-                val filesAfter = downloadDir.listFiles() ?: emptyArray()
-                val newFile = filesAfter.filter { it.name !in filesBefore }
+                val filesAfter = workDir.listFiles() ?: emptyArray()
+                val newFile = filesAfter
+                    .filter { file ->
+                        file.isFile &&
+                            file.name !in filesBefore &&
+                            file.exists() &&
+                            file.length() > 0L &&
+                            !hasIncompleteExtension(file.name)
+                    }
                     .maxByOrNull { it.lastModified() }
-                    ?: filesAfter.filter { !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") }
-                        .maxByOrNull { it.lastModified() }
-                    ?: File(downloadDir, "downloaded_media")
+                    ?: throw IllegalStateException("Download finished without producing a verified media file")
 
-                if (newFile.exists()) {
-                    scanMediaFile(newFile)
-                }
-
-                return@withContext Result.success(newFile)
+                verifyDownloadedMedia(newFile)
+                val finalFile = finalizeDownloadedFile(newFile)
+                return@withContext Result.success(finalFile)
             } catch (e: Exception) {
                 Log.w(TAG, "Download strategy $index failed for ${config.url}: ${e.message}")
                 lastException = e
@@ -593,11 +608,7 @@ class YtDlpRepository(private val context: Context) {
                     Log.i(TAG, "Process $processId was cancelled. Aborting strategies.")
                     break
                 }
-                val isBotError = e.message?.contains("Sign in to confirm you’re not a bot", ignoreCase = true) == true ||
-                        e.message?.contains("bot", ignoreCase = true) == true
-                if (!isBotError && index > 0) {
-                    break
-                }
+                tempDir.deleteRecursively()
             }
         }
 
@@ -606,10 +617,25 @@ class YtDlpRepository(private val context: Context) {
         return@withContext Result.failure(finalError)
     }
 
+    private fun hasIncompleteExtension(fileName: String): Boolean {
+        val lower = fileName.lowercase().trim()
+        val ext = lower.substringAfterLast('.', "")
+        return ext == "part" ||
+            ext == "ytdl" ||
+            ext == "tmp" ||
+            lower.endsWith(".part") ||
+            lower.endsWith(".ytdl") ||
+            lower.endsWith(".tmp") ||
+            lower.contains(".part-")
+    }
+
     /**
      * Inspects and logs actual dimensions, file size, and codecs of the downloaded file.
      */
     private fun verifyDownloadedMedia(file: File) {
+        if (!file.exists() || !file.isFile || file.length() <= 0L || hasIncompleteExtension(file.name)) {
+            throw IllegalStateException("Downloaded media verification failed for: ${file.name}")
+        }
         val retriever = android.media.MediaMetadataRetriever()
         try {
             retriever.setDataSource(file.absolutePath)
@@ -619,7 +645,7 @@ class YtDlpRepository(private val context: Context) {
             val mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
             Log.i(TAG, "DOWNLOAD VERIFICATION SUCCESS: File='${file.name}', Size=${formatBytes(file.length())}, Dimensions=${w}x${h}, Mime=$mime, Duration=${duration}ms")
         } catch (e: Exception) {
-            Log.w(TAG, "Media metadata retrieval: ${e.message}")
+            Log.i(TAG, "DOWNLOAD VERIFICATION SUCCESS: File='${file.name}', Size=${formatBytes(file.length())}, Dimensions=N/A (${e.message})")
         } finally {
             try {
                 retriever.release()
@@ -921,15 +947,232 @@ class YtDlpRepository(private val context: Context) {
         }
     }
 
+    private fun getWorkDirectory(): File {
+        val baseDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+        return File(baseDir, "${DOWNLOADS_SUBDIR}_work").apply {
+            if (!exists()) mkdirs()
+        }
+    }
+
+    private fun canWriteToDirectory(dir: File): Boolean {
+        return try {
+            val probe = File(dir, ".probe_${System.nanoTime()}.tmp")
+            FileOutputStream(probe).use { it.write(1) }
+            val ok = probe.exists() && probe.length() > 0L
+            probe.delete()
+            ok
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun getDownloadDirectory(): File {
         val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val dmDir = File(publicDir, DOWNLOADS_SUBDIR)
-        return if (dmDir.exists() || dmDir.mkdirs()) {
+        return if ((dmDir.exists() || dmDir.mkdirs()) && canWriteToDirectory(dmDir)) {
             dmDir
         } else {
-            File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), DOWNLOADS_SUBDIR).apply {
+            val fallbackBase = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+            File(fallbackBase, DOWNLOADS_SUBDIR).apply {
                 if (!exists()) mkdirs()
             }
+        }
+    }
+
+    private fun finalizeDownloadedFile(sourceFile: File): File {
+        val sourceSize = sourceFile.length()
+        if (sourceSize <= 0L || !sourceFile.exists()) {
+            throw IllegalStateException("Cannot finalize missing or empty file: ${sourceFile.name}")
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val mediaStoreFile = saveToMediaStoreDownloads(sourceFile, sourceSize)
+            if (mediaStoreFile != null) {
+                return mediaStoreFile
+            }
+        }
+
+        return moveFileToFallbackDirectory(sourceFile, sourceSize)
+    }
+
+    private fun saveToMediaStoreDownloads(sourceFile: File, expectedSize: Long): File? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val resolver = context.contentResolver
+        val mimeType = resolveMimeType(sourceFile)
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$DOWNLOADS_SUBDIR"
+
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        var insertedUri: Uri? = null
+        return try {
+            insertedUri = resolver.insert(collection, values)
+                ?: throw IllegalStateException("MediaStore.Downloads insert returned null")
+
+            var bytesCopied = 0L
+            resolver.openOutputStream(insertedUri)?.use { out ->
+                FileInputStream(sourceFile).use { input ->
+                    bytesCopied = input.copyTo(out, bufferSize = 64 * 1024)
+                }
+                out.flush()
+            } ?: throw IllegalStateException("Failed to open OutputStream for $insertedUri")
+
+            if (bytesCopied <= 0L) {
+                throw IllegalStateException("Zero bytes written to MediaStore")
+            }
+
+            val completeValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }
+            resolver.update(insertedUri, completeValues, null, null)
+
+            var finalPath: String? = null
+            var displayName: String = sourceFile.name
+            resolver.query(
+                insertedUri,
+                arrayOf(MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val dataIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                    if (dataIdx >= 0) {
+                        finalPath = cursor.getString(dataIdx)
+                    }
+                    val nameIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                    if (nameIdx >= 0) {
+                        cursor.getString(nameIdx)?.takeIf { it.isNotBlank() }?.let { displayName = it }
+                    }
+                }
+            }
+
+            val targetPath = if (!finalPath.isNullOrBlank()) {
+                finalPath!!
+            } else {
+                val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                File(File(publicDownloads, DOWNLOADS_SUBDIR), displayName).absolutePath
+            }
+
+            sourceFile.delete()
+
+            val resultFile = object : File(targetPath) {
+                override fun length(): Long {
+                    val actual = super.length()
+                    return if (actual > 0L) actual else expectedSize
+                }
+
+                override fun exists(): Boolean {
+                    return super.exists() || isMediaStoreUriAlive(insertedUri)
+                }
+            }
+
+            scanMediaFile(resultFile)
+            Log.i(TAG, "Moved downloaded file to MediaStore Downloads: path=${resultFile.absolutePath}, uri=$insertedUri, size=${formatBytes(expectedSize)}")
+            resultFile
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore Downloads write failed, falling back to File path: ${e.message}", e)
+            if (insertedUri != null) {
+                try {
+                    resolver.delete(insertedUri, null, null)
+                } catch (_: Exception) {
+                }
+            }
+            null
+        }
+    }
+
+    private fun isMediaStoreUriAlive(uri: Uri?): Boolean {
+        if (uri == null) return false
+        return try {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length != 0L } ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun moveFileToFallbackDirectory(sourceFile: File, expectedSize: Long): File {
+        val destDir = getDownloadDirectory()
+        if (!destDir.exists()) {
+            destDir.mkdirs()
+        }
+
+        if (sourceFile.parentFile?.absolutePath == destDir.absolutePath) {
+            scanMediaFile(sourceFile)
+            return sourceFile
+        }
+
+        var targetFile = resolveNonCollidingFile(destDir, sourceFile.name)
+        val movedToPrimary = try {
+            if (sourceFile.renameTo(targetFile) && targetFile.exists() && targetFile.length() > 0L) {
+                true
+            } else {
+                sourceFile.copyTo(targetFile, overwrite = true)
+                val ok = targetFile.exists() && targetFile.length() > 0L
+                if (ok) sourceFile.delete()
+                ok
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Fallback write to ${destDir.absolutePath} failed, using app-private DownloadMaster dir", e)
+            false
+        }
+
+        if (!movedToPrimary) {
+            val appPrivateBase = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+            val appPrivateDir = File(appPrivateBase, DOWNLOADS_SUBDIR).apply {
+                if (!exists()) mkdirs()
+            }
+            targetFile = resolveNonCollidingFile(appPrivateDir, sourceFile.name)
+            sourceFile.copyTo(targetFile, overwrite = true)
+            sourceFile.delete()
+        }
+
+        if (!targetFile.exists() || targetFile.length() <= 0L) {
+            throw IllegalStateException("Failed to write downloaded file to final location (expected $expectedSize bytes)")
+        }
+
+        scanMediaFile(targetFile)
+        return targetFile
+    }
+
+    private fun resolveNonCollidingFile(dir: File, fileName: String): File {
+        var candidate = File(dir, fileName)
+        if (!candidate.exists()) return candidate
+        val baseName = fileName.substringBeforeLast('.', fileName)
+        val ext = fileName.substringAfterLast('.', "")
+        var counter = 1
+        while (candidate.exists()) {
+            val nextName = if (ext.isNotEmpty()) "${baseName}_$counter.$ext" else "${baseName}_$counter"
+            candidate = File(dir, nextName)
+            counter++
+        }
+        return candidate
+    }
+
+    private fun resolveMimeType(file: File): String {
+        val ext = file.extension.lowercase()
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)?.let {
+            if (it.isNotBlank()) return it
+        }
+        return when (ext) {
+            "mp4", "m4v" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "webm" -> "video/webm"
+            "mov" -> "video/quicktime"
+            "avi" -> "video/x-msvideo"
+            "flv" -> "video/x-flv"
+            "3gp" -> "video/3gpp"
+            "mp3" -> "audio/mpeg"
+            "m4a", "aac" -> "audio/mp4"
+            "wav" -> "audio/wav"
+            "flac" -> "audio/flac"
+            "ogg", "opus" -> "audio/ogg"
+            else -> "application/octet-stream"
         }
     }
 
@@ -954,17 +1197,23 @@ class YtDlpRepository(private val context: Context) {
 
     fun cleanupIncompleteFiles() {
         try {
-            val downloadDir = getDownloadDirectory()
-            if (downloadDir.exists() && downloadDir.isDirectory) {
-                val incompleteFiles = downloadDir.listFiles { file ->
-                    val name = file.name.lowercase()
-                    name.endsWith(".part") || name.endsWith(".ytdl") || name.startsWith("temp_dl_")
-                }
-                incompleteFiles?.forEach { file ->
-                    try {
-                        file.delete()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to delete incomplete file: ${file.name}")
+            val dirs = listOf(getWorkDirectory(), getDownloadDirectory())
+            for (dir in dirs) {
+                if (dir.exists() && dir.isDirectory) {
+                    val incompleteFiles = dir.listFiles { file ->
+                        val name = file.name.lowercase()
+                        name.endsWith(".part") ||
+                            name.endsWith(".ytdl") ||
+                            name.endsWith(".tmp") ||
+                            name.startsWith("temp_dl_") ||
+                            name.contains(".part-")
+                    }
+                    incompleteFiles?.forEach { file ->
+                        try {
+                            if (file.isDirectory) file.deleteRecursively() else file.delete()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to delete incomplete file: ${file.name}")
+                        }
                     }
                 }
             }
