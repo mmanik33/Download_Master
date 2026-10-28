@@ -336,11 +336,18 @@ fun DownloadsScreen(
                     Text(text = "${selectedItems.size} Selected", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                 }
                 Row {
-                    if (selectedItems.size == 1) {
+                    if (selectedItems.isNotEmpty()) {
                         IconButton(onClick = {
-                            val id = selectedItems.first()
-                            val item = historyItems.find { it.id == id }
-                            item?.let { shareMediaFile(context, it.localFilePath) }
+                            if (selectedItems.size == 1) {
+                                val id = selectedItems.first()
+                                val item = historyItems.find { it.id == id }
+                                item?.let { shareMediaFile(context, it.localFilePath) }
+                            } else {
+                                val selectedFilePaths = historyItems
+                                    .filter { selectedItems.contains(it.id) }
+                                    .map { it.localFilePath }
+                                shareMultipleMediaFiles(context, selectedFilePaths)
+                            }
                         }) {
                             Icon(imageVector = androidx.compose.material.icons.Icons.Default.Share, contentDescription = "Share Selected", tint = PrimaryPurple)
                         }
@@ -499,6 +506,8 @@ fun DownloadsScreen(
                         thumbnailUrl = downloadingState.mediaInfo.thumbnailUrl,
                         qualityTag = if (downloadingState.config.isAudioOnly) downloadingState.config.audioFormat.name else downloadingState.config.videoQuality.label,
                         progressPercent = downloadingState.progress.progressPercent.toInt(),
+                        downloadedMB = downloadingState.progress.downloadedMB,
+                        totalMB = downloadingState.progress.totalMB,
                         progressText = when {
                             isWaitingForWifi -> "Waiting for Wi-Fi"
                             downloadingState.isPaused -> "Paused • Tap play to resume"
@@ -585,6 +594,8 @@ private fun ActiveDownloadCard(
     thumbnailUrl: String?,
     qualityTag: String,
     progressPercent: Int,
+    downloadedMB: Double = 0.0,
+    totalMB: Double = 0.0,
     progressText: String?,
     speedText: String,
     stageText: String,
@@ -757,8 +768,16 @@ private fun ActiveDownloadCard(
                     modifier = Modifier.weight(1f, fill = false)
                 )
 
+                val rightProgressLabel = if (totalMB > 0.0) {
+                    String.format(java.util.Locale.US, "%.1f MB / %.1f MB • %d%%", downloadedMB, totalMB, progressPercent)
+                } else if (progressPercent > 0) {
+                    "$progressPercent%"
+                } else {
+                    "Preparing..."
+                }
+
                 Text(
-                    text = if (progressPercent > 0) "$progressPercent%" else "Preparing...",
+                    text = rightProgressLabel,
                     color = colors.textPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
@@ -1062,6 +1081,27 @@ private fun shareMediaFile(context: Context, filePath: String) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "*/*"
             putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share media via"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun shareMultipleMediaFiles(context: Context, filePaths: List<String>) {
+    try {
+        val uris = ArrayList<Uri>()
+        for (path in filePaths) {
+            resolveMediaUri(context, path)?.let { uris.add(it) }
+        }
+        if (uris.isEmpty()) {
+            Toast.makeText(context, "File does not exist", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "*/*"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, "Share media via"))

@@ -89,8 +89,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        handleIncomingIntent(intent)
-
         setContent {
             val themeMode by viewModel.themeMode.collectAsState()
             val colorPalette by viewModel.colorPalette.collectAsState()
@@ -104,30 +102,6 @@ class MainActivity : ComponentActivity() {
                 DownloadMasterApp(viewModel = viewModel)
             }
         }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleIncomingIntent(intent)
-    }
-
-    private fun handleIncomingIntent(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
-            if (!sharedText.isNullOrBlank()) {
-                val extractedUrl = extractUrlFromText(sharedText)
-                if (extractedUrl.isNotBlank()) {
-                    viewModel.pasteFromClipboard(extractedUrl)
-                }
-            }
-        }
-    }
-
-    private fun extractUrlFromText(text: String): String {
-        val urlRegex = Regex("""https?://[^\s]+""")
-        val match = urlRegex.find(text)
-        return match?.value ?: text.trim()
     }
 }
 

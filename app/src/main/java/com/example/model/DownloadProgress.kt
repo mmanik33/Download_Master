@@ -5,6 +5,8 @@ package com.example.model
  */
 data class DownloadProgress(
     val progressPercent: Float = 0f,
+    val downloadedMB: Double = 0.0,
+    val totalMB: Double = 0.0,
     val speedText: String = "0 KB/s",
     val etaText: String = "--:--",
     val lineText: String = "",

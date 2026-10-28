@@ -62,6 +62,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_DOWNLOAD_PATH = "key_download_path"
         private const val KEY_THEME_MODE = "key_theme_mode" // "SYSTEM", "LIGHT", "DARK"
         private const val KEY_COLOR_PALETTE = "key_color_palette" // "DYNAMIC", "PURPLE", "BLUE", "GREEN", "ORANGE", "ROSE"
+
+        private val sharedActiveDownloads = MutableStateFlow<Map<String, ActiveDownloadData>>(emptyMap())
+        private val sharedDownloadHistory = MutableStateFlow<List<DownloadHistoryItem>>(emptyList())
+        private val pendingMediaByUrl = java.util.concurrent.ConcurrentHashMap<String, MediaModel>()
+        private val processScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
+        @Volatile
+        private var isProcessCollectorStarted = false
+        @Volatile
+        private var isHistoryLoaded = false
     }
 
     // Active Theme Mode
@@ -115,12 +124,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val customArguments = MutableStateFlow("")
 
     // Active & Completed Downloads Tracking
-    val activeDownloads = kotlinx.coroutines.flow.MutableStateFlow<Map<String, ActiveDownloadData>>(emptyMap())
-    // removed count
-    // removed paused
+    val activeDownloads = sharedActiveDownloads
 
     // Download History
-    private val _downloadHistory = MutableStateFlow<List<DownloadHistoryItem>>(emptyList())
+    private val _downloadHistory = sharedDownloadHistory
     val downloadHistory: StateFlow<List<DownloadHistoryItem>> = _downloadHistory.asStateFlow()
 
     // History Search Query
@@ -138,7 +145,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (rawSavedLocation != null && rawSavedLocation != downloadLocation.value) {
             prefs.edit().putString(KEY_DOWNLOAD_PATH, downloadLocation.value).apply()
         }
-        loadHistory()
+        if (!isHistoryLoaded) {
+            isHistoryLoaded = true
+            loadHistory()
+        }
         loadBookmarks()
         observeServiceEvents()
     }
@@ -148,53 +158,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun observeServiceEvents() {
+        synchronized(Companion) {
+            if (!isProcessCollectorStarted) {
+                isProcessCollectorStarted = true
+                processScope.launch {
+                    DownloadForegroundService.downloadEvents.collect { event ->
+                        when (event) {
+                            is DownloadForegroundService.DownloadEvent.Started -> {
+                                val mediaInfo = pendingMediaByUrl[event.config.url]
+                                if (mediaInfo != null) {
+                                    val newData = ActiveDownloadData(
+                                        processId = event.id,
+                                        config = event.config,
+                                        mediaInfo = mediaInfo,
+                                        progress = com.example.model.DownloadProgress(stage = com.example.model.DownloadStage.INITIALIZING)
+                                    )
+                                    activeDownloads.value = activeDownloads.value + (event.id to newData)
+                                }
+                            }
+                            is DownloadForegroundService.DownloadEvent.Progress -> {
+                                val current = activeDownloads.value[event.id]
+                                if (current != null) {
+                                    activeDownloads.value = activeDownloads.value + (event.id to current.copy(progress = event.progress, isPaused = event.isPaused))
+                                }
+                            }
+                            is DownloadForegroundService.DownloadEvent.Completed -> {
+                                val current = activeDownloads.value[event.id]
+                                if (current != null) {
+                                    addHistoryItem(current.mediaInfo, event.file, current.config, "Completed")
+                                    activeDownloads.value = activeDownloads.value - event.id
+                                }
+                            }
+                            is DownloadForegroundService.DownloadEvent.Failed -> {
+                                activeDownloads.value = activeDownloads.value - event.id
+                            }
+                            is DownloadForegroundService.DownloadEvent.Cancelled -> {
+                                val current = activeDownloads.value[event.id]
+                                if (current != null) {
+                                    addHistoryItem(current.mediaInfo, null, current.config, "Cancelled")
+                                }
+                                activeDownloads.value = activeDownloads.value - event.id
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         viewModelScope.launch {
             DownloadForegroundService.downloadEvents.collect { event ->
                 when (event) {
                     is DownloadForegroundService.DownloadEvent.Started -> {
-                        val mediaInfo = (uiState.value as? DownloadUiState.Ready)?.mediaInfo ?: (uiState.value as? DownloadUiState.Downloading)?.mediaInfo
-                        if (mediaInfo != null) {
-                            val newData = ActiveDownloadData(
-                                processId = event.id,
-                                config = event.config,
-                                mediaInfo = mediaInfo,
-                                progress = com.example.model.DownloadProgress(stage = com.example.model.DownloadStage.INITIALIZING)
-                            )
-                            activeDownloads.value = activeDownloads.value + (event.id to newData)
+                        if (activeDownloads.value[event.id] == null) {
+                            val mediaInfo = (uiState.value as? DownloadUiState.Ready)?.mediaInfo
+                                ?: (uiState.value as? DownloadUiState.Downloading)?.mediaInfo
+                                ?: pendingMediaByUrl[event.config.url]
+                            if (mediaInfo != null) {
+                                val newData = ActiveDownloadData(
+                                    processId = event.id,
+                                    config = event.config,
+                                    mediaInfo = mediaInfo,
+                                    progress = com.example.model.DownloadProgress(stage = com.example.model.DownloadStage.INITIALIZING)
+                                )
+                                activeDownloads.value = activeDownloads.value + (event.id to newData)
+                            }
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Progress -> {
-                        val current = activeDownloads.value[event.id]
-                        if (current != null) {
-                            activeDownloads.value = activeDownloads.value + (event.id to current.copy(progress = event.progress, isPaused = event.isPaused))
-                        }
                         val currentUi = _uiState.value
                         if (currentUi is DownloadUiState.Downloading) {
                             _uiState.value = currentUi.copy(progress = event.progress)
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Completed -> {
-                        val current = activeDownloads.value[event.id]
-                        if (current != null) {
-                            addHistoryItem(current.mediaInfo, event.file, current.config, "Completed")
-                            activeDownloads.value = activeDownloads.value - event.id
-                        }
                         if (activeDownloads.value.isEmpty()) {
                             _uiState.value = DownloadUiState.Idle
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Failed -> {
-                        activeDownloads.value = activeDownloads.value - event.id
                         if (activeDownloads.value.isEmpty()) {
                             _uiState.value = DownloadUiState.Error(event.error)
                         }
                     }
                     is DownloadForegroundService.DownloadEvent.Cancelled -> {
-                        val current = activeDownloads.value[event.id]
-                        if (current != null) {
-                            addHistoryItem(current.mediaInfo, null, current.config, "Cancelled")
-                        }
-                        activeDownloads.value = activeDownloads.value - event.id
                         if (activeDownloads.value.isEmpty()) {
                             _uiState.value = DownloadUiState.Idle
                         }
@@ -271,15 +317,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selectedFormatId.value = formatId
 
         val config = buildCurrentConfig(media.title, media.webpageUrl)
+        pendingMediaByUrl[config.url] = media
         val downloadingState = DownloadUiState.Downloading(
             mediaInfo = media,
             config = config,
             progress = DownloadProgress(stage = DownloadStage.INITIALIZING)
         )
         _uiState.value = downloadingState
-        
 
-        
         DownloadForegroundService.startDownload(getApplication(), config)
     }
 

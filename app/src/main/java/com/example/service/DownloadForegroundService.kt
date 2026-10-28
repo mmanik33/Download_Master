@@ -426,6 +426,18 @@ class DownloadForegroundService : Service() {
                 val speedMatch = Regex("""\\bat\\s+([0-9.]+\\s*[KMGT]?i?B/s)""").find(line)
                 val speedStr = speedMatch?.groupValues?.get(1) ?: if (progressPercent > 0) "Downloading" else "Connecting..."
 
+                val parsedTotalMB = parseTotalSizeMBFromLine(line)
+                val totalMB = if (parsedTotalMB != null && parsedTotalMB > 0.0) {
+                    parsedTotalMB
+                } else {
+                    jobState.progress.totalMB
+                }
+                val downloadedMB = if (parsedTotalMB != null && parsedTotalMB > 0.0) {
+                    (progressPercent.coerceIn(0f, 100f) / 100.0) * totalMB
+                } else {
+                    jobState.progress.downloadedMB
+                }
+
                 val stage = when {
                     "ExtractAudio" in line || "ffmpeg" in line.lowercase() -> DownloadStage.EXTRACTING_AUDIO
                     "Merger" in line -> DownloadStage.MERGING_FORMATS
@@ -444,6 +456,8 @@ class DownloadForegroundService : Service() {
 
                 val p = DownloadProgress(
                     progressPercent = progressPercent,
+                    downloadedMB = downloadedMB,
+                    totalMB = totalMB,
                     speedText = speedStr,
                     etaText = etaFormatted,
                     lineText = cleanLineText,
@@ -586,6 +600,20 @@ class DownloadForegroundService : Service() {
             .setAutoCancel(true)
             .build()
         notificationManager.notify((System.currentTimeMillis() % 10000).toInt(), notification)
+    }
+
+    private fun parseTotalSizeMBFromLine(line: String): Double? {
+        val match = Regex("""\bof\s+~?\s*([0-9]+(?:\.[0-9]+)?)\s*(GiB|GB|MiB|MB|KiB|KB|B)\b""", RegexOption.IGNORE_CASE).find(line)
+            ?: return null
+        val value = match.groupValues[1].toDoubleOrNull() ?: return null
+        if (value <= 0.0) return null
+        return when (match.groupValues[2].uppercase()) {
+            "GIB", "GB" -> value * 1024.0
+            "MIB", "MB" -> value
+            "KIB", "KB" -> value / 1024.0
+            "B" -> value / (1024.0 * 1024.0)
+            else -> null
+        }
     }
 
     private fun formatFileSize(bytes: Long): String {

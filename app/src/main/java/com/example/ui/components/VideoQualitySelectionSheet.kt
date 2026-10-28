@@ -574,20 +574,10 @@ private fun formatBytes(bytes: Long): String {
 }
 
 private fun calculateEstimatedSize(durationSec: Long, height: Int, fps: Double = 30.0): String {
-    val fpsMultiplier = if (fps > 45) 1.35 else 1.0
     if (durationSec <= 0) {
-        return when {
-            height >= 4320 -> "4.80 GB"
-            height >= 2160 -> if (fps > 45) "2.85 GB" else "2.10 GB"
-            height >= 1440 -> if (fps > 45) "1.50 GB" else "1.15 GB"
-            height >= 1080 -> if (fps > 45) "850 MB" else "650 MB"
-            height >= 720 -> if (fps > 45) "480 MB" else "350 MB"
-            height >= 480 -> "160 MB"
-            height >= 360 -> "110 MB"
-            height >= 240 -> "70 MB"
-            else -> "40 MB"
-        }
+        return "--"
     }
+    val fpsMultiplier = if (fps > 45) 1.35 else 1.0
     val bitrateKbps = when {
         height >= 4320 -> (30000L * fpsMultiplier).toLong()
         height >= 2160 -> (16000L * fpsMultiplier).toLong()
@@ -610,13 +600,7 @@ private fun calculateEstimatedSize(durationSec: Long, height: Int, fps: Double =
 
 private fun calculateEstimatedAudioSize(durationSec: Long, kbps: Int): String {
     if (durationSec <= 0) {
-        return when (kbps) {
-            1411 -> "45.0 MB"
-            800 -> "25.0 MB"
-            320 -> "10.5 MB"
-            256 -> "8.2 MB"
-            else -> "5.0 MB"
-        }
+        return "--"
     }
     val totalBytes = (durationSec * kbps * 1000) / 8
     return String.format("%.1f MB", totalBytes / (1024.0 * 1024.0))
