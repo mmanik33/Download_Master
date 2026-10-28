@@ -156,41 +156,43 @@ fun VideoQualitySelectionSheet(
                     score
                 } ?: formats.first()
 
+                val displayHeight = if (bestFormat.width > 0) minOf(h, bestFormat.width) else h
+
                 val fps = bestFormat.fps.toInt()
                 val fpsSuffix = if (fps >= 45) " ${fps}fps" else ""
 
                 val baseLabel = when {
-                    h >= 4320 -> "8K (4320p$fpsSuffix)"
-                    h >= 2160 -> "4K (2160p$fpsSuffix)"
-                    h >= 1440 -> "2K (1440p$fpsSuffix)"
-                    h in 1000..1120 -> "1080p (Full HD$fpsSuffix)"
-                    h in 680..760 -> "720p (HD$fpsSuffix)"
-                    h in 440..520 -> "480p (SD)"
-                    h in 320..380 -> "360p (Data Saver)"
-                    h in 200..280 -> "240p (Low)"
-                    h >= 144 -> "${h}p (Eco)"
-                    else -> "${h}p"
+                    displayHeight >= 4320 -> "8K (4320p$fpsSuffix)"
+                    displayHeight >= 2160 -> "4K (2160p$fpsSuffix)"
+                    displayHeight >= 1440 -> "2K (1440p$fpsSuffix)"
+                    displayHeight in 1000..1120 -> "1080p (Full HD$fpsSuffix)"
+                    displayHeight in 680..760 -> "720p (HD$fpsSuffix)"
+                    displayHeight in 440..520 -> "480p (SD)"
+                    displayHeight in 320..380 -> "360p (Data Saver)"
+                    displayHeight in 200..280 -> "240p (Low)"
+                    displayHeight >= 144 -> "${displayHeight}p (Eco)"
+                    else -> "${displayHeight}p"
                 }
 
-                val fullLabel = if (h == maxHeight && h >= 720) "$baseLabel • Max" else baseLabel
+                val fullLabel = if (h == maxHeight && displayHeight >= 720) "$baseLabel • Max" else baseLabel
                 val resTag = when {
-                    h >= 4320 -> "8K"
-                    h >= 2160 -> "4K"
-                    h >= 1440 -> "2K"
-                    h in 1000..1120 -> "1080p"
-                    h in 680..760 -> "720p"
-                    h in 440..520 -> "480p"
-                    h in 320..380 -> "360p"
-                    h in 200..280 -> "240p"
-                    else -> "${h}p"
+                    displayHeight >= 4320 -> "8K"
+                    displayHeight >= 2160 -> "4K"
+                    displayHeight >= 1440 -> "2K"
+                    displayHeight in 1000..1120 -> "1080p"
+                    displayHeight in 680..760 -> "720p"
+                    displayHeight in 440..520 -> "480p"
+                    displayHeight in 320..380 -> "360p"
+                    displayHeight in 200..280 -> "240p"
+                    else -> "${displayHeight}p"
                 }
 
                 val qual = when {
-                    h >= 2160 -> VideoQuality.P2160
-                    h >= 1440 -> VideoQuality.P1440
-                    h >= 1000 -> VideoQuality.P1080
-                    h >= 680 -> VideoQuality.P720
-                    h >= 440 -> VideoQuality.P480
+                    displayHeight >= 2160 -> VideoQuality.P2160
+                    displayHeight >= 1440 -> VideoQuality.P1440
+                    displayHeight >= 1000 -> VideoQuality.P1080
+                    displayHeight >= 680 -> VideoQuality.P720
+                    displayHeight >= 440 -> VideoQuality.P480
                     else -> VideoQuality.P360
                 }
 
@@ -205,10 +207,10 @@ fun VideoQualitySelectionSheet(
                 val estSize = if (combinedFileSize > 0) {
                     formatBytes(combinedFileSize)
                 } else {
-                    calculateEstimatedSize(media.durationSeconds, h, bestFormat.fps)
+                    calculateEstimatedSize(media.durationSeconds, displayHeight, bestFormat.fps)
                 }
 
-                Log.d(TAG, "Mapped resolution ${h}p -> formatId: ${bestFormat.formatId}, ext: ${bestFormat.ext}, size: $estSize")
+                Log.d(TAG, "Mapped resolution ${h}p (display ${displayHeight}p) -> formatId: ${bestFormat.formatId}, ext: ${bestFormat.ext}, size: $estSize")
 
                 list.add(
                     QualityOption(
