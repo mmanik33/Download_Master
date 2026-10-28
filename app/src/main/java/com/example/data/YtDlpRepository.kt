@@ -476,6 +476,8 @@ class YtDlpRepository(private val context: Context) {
         }
 
         var lastException: Exception? = null
+        val requestedTargetHeight = if (!config.isAudioOnly) resolveTargetHeight(config) else null
+        var bestDeliveredHeight: Int? = null
 
         for ((index, applyStrategy) in strategies.withIndex()) {
             val tempDir = File(workDir, "temp_${processId}")
@@ -612,6 +614,22 @@ class YtDlpRepository(private val context: Context) {
                     ?: throw IllegalStateException("Download finished without producing a verified media file")
 
                 verifyDownloadedMedia(newFile)
+                if (!config.isAudioOnly && targetHeight != null) {
+                    val actualHeight = probeVideoHeight(newFile)
+                    if (actualHeight != null && actualHeight > 0) {
+                        if (bestDeliveredHeight == null || actualHeight > bestDeliveredHeight!!) {
+                            bestDeliveredHeight = actualHeight
+                        }
+                        if (actualHeight < targetHeight) {
+                            Log.w(
+                                TAG,
+                                "Degraded video quality on strategy $index: requested ${targetHeight}p, delivered ${actualHeight}p for '${newFile.name}'. Deleting degraded file and trying next strategy."
+                            )
+                            newFile.delete()
+                            throw IllegalStateException("Requested quality ${targetHeight}p not met (delivered ${actualHeight}p)")
+                        }
+                    }
+                }
                 val finalFile = finalizeDownloadedFile(newFile, config.outputDir)
                 return@withContext Result.success(finalFile)
             } catch (e: Exception) {
@@ -625,9 +643,32 @@ class YtDlpRepository(private val context: Context) {
             }
         }
 
-        val finalError = lastException ?: IllegalStateException("Download failed")
+        val finalError = if (!config.isAudioOnly && requestedTargetHeight != null && bestDeliveredHeight != null && bestDeliveredHeight!! < requestedTargetHeight) {
+            IllegalStateException(
+                "Requested video quality ${requestedTargetHeight}p could not be reached across all strategies (best delivered quality was ${bestDeliveredHeight}p)"
+            )
+        } else {
+            lastException ?: IllegalStateException("Download failed")
+        }
         Log.e(TAG, "All download strategies failed for process $processId", finalError)
         return@withContext Result.failure(finalError)
+    }
+
+    private fun probeVideoHeight(file: File): Int? {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val h = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            h?.toIntOrNull()?.takeIf { it > 0 }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not probe video height for '${file.name}': ${e.message}")
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun hasIncompleteExtension(fileName: String): Boolean {
