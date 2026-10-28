@@ -10,7 +10,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.DownloadMasterApp
 import com.example.data.YtDlpRepository
 import com.example.model.AudioFormat
-import com.example.model.BookmarkItem
 import com.example.model.DownloadConfig
 import com.example.model.DownloadHistoryItem
 import com.example.model.DownloadProgress
@@ -32,8 +31,6 @@ import java.io.File
 
 enum class MainTab(val title: String) {
     HOME("Home"),
-    DOWNLOADS("Downloads"),
-    BROWSER("Browser"),
     SETTINGS("Settings")
 }
 
@@ -53,7 +50,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val TAG = "MainViewModel"
         private const val KEY_HISTORY = "key_download_history"
-        private const val KEY_BOOKMARKS = "key_bookmarks"
         private const val KEY_USE_ARIA2C = "key_use_aria2c"
         private const val KEY_EMBED_THUMBNAIL = "key_embed_thumbnail"
         private const val KEY_EMBED_METADATA = "key_embed_metadata"
@@ -129,13 +125,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _downloadHistory = sharedDownloadHistory
     val downloadHistory: StateFlow<List<DownloadHistoryItem>> = _downloadHistory.asStateFlow()
 
-    // Browser State
-    val browserUrlInput = MutableStateFlow("")
-    val activeBrowserUrl = MutableStateFlow<String?>(null)
-    val detectedBrowserVideoUrl = MutableStateFlow<String?>(null)
-    private val _bookmarks = MutableStateFlow<List<BookmarkItem>>(emptyList())
-    val bookmarks: StateFlow<List<BookmarkItem>> = _bookmarks.asStateFlow()
-
     init {
         val rawSavedLocation = prefs.getString(KEY_DOWNLOAD_PATH, null)
         if (rawSavedLocation != null && rawSavedLocation != downloadLocation.value) {
@@ -145,7 +134,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isHistoryLoaded = true
             loadHistory()
         }
-        loadBookmarks()
         observeServiceEvents()
     }
 
@@ -509,138 +497,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getCookiesContent(): String = repository.getCookiesContent()
     fun saveCookies(cookiesText: String): Boolean = repository.saveCookies(cookiesText)
     fun clearCookies(): Boolean = repository.clearCookies()
-
-    // Browser Helpers
-    fun navigateBrowserTo(url: String) {
-        val target = if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            if (url.contains(".") && !url.contains(" ")) "https://$url" else "https://www.google.com/search?q=$url"
-        } else {
-            url
-        }
-        browserUrlInput.value = target
-        activeBrowserUrl.value = target
-        _currentTab.value = MainTab.BROWSER
-    }
-
-    fun onBrowserUrlChanged(url: String) {
-        browserUrlInput.value = url
-        // Detect video link presence
-        if (isVideoLink(url)) {
-            detectedBrowserVideoUrl.value = url
-        }
-    }
-
-    private fun isVideoLink(url: String): Boolean {
-        val lower = url.lowercase().trim()
-        return lower.contains("youtube.com/watch") ||
-                lower.contains("youtu.be/") ||
-                lower.contains("youtube.com/shorts") ||
-                lower.contains("facebook.com/watch") ||
-                lower.contains("fb.watch") ||
-                lower.contains("tiktok.com/@") ||
-                lower.contains("instagram.com/p/") ||
-                lower.contains("instagram.com/reel/") ||
-                lower.contains("vimeo.com/") ||
-                lower.contains("dailymotion.com/video") ||
-                lower.contains("twitter.com/") ||
-                lower.contains("x.com/") ||
-                isSoundCloudMediaLink(lower) ||
-                isRedditMediaLink(lower) ||
-                isPinterestPinLink(lower) ||
-                isTumblrPostLink(lower) ||
-                isLikeeVideoLink(lower)
-    }
-
-    private fun isSoundCloudMediaLink(lowerUrl: String): Boolean {
-        if (Regex("""^https?://on\.soundcloud\.com/[a-z0-9_-]+""").containsMatchIn(lowerUrl)) {
-            return true
-        }
-        val reservedPaths = "(?:discover|stream|search|you|settings|upload|messages|notifications|charts|pages|terms|imprint|popular|tags|signin|login|logout|pro|go|feed|stations|people)"
-        return Regex("""^https?://(?:(?:www|m)\.)?soundcloud\.com/(?!$reservedPaths(?:/|$|[?#]))[a-z0-9_-]+/(?:sets/[a-z0-9_-]+|[a-z0-9_-]+)""").containsMatchIn(lowerUrl)
-    }
-
-    private fun isRedditMediaLink(lowerUrl: String): Boolean {
-        return Regex("""^https?://(?:[a-z0-9-]+\.)?reddit\.com/(?:r/[a-z0-9_]+/(?:comments|s)/[a-z0-9]+|user/[a-z0-9_-]+/comments/[a-z0-9]+|comments/[a-z0-9]+)""").containsMatchIn(lowerUrl) ||
-                Regex("""^https?://v\.redd\.it/[a-z0-9]+""").containsMatchIn(lowerUrl)
-    }
-
-    private fun isPinterestPinLink(lowerUrl: String): Boolean {
-        return Regex("""^https?://(?:[a-z0-9-]+\.)?pinterest\.[a-z.]+/pin/[a-z0-9_-]+""").containsMatchIn(lowerUrl) ||
-                Regex("""^https?://pin\.it/[a-z0-9_-]+""").containsMatchIn(lowerUrl)
-    }
-
-    private fun isTumblrPostLink(lowerUrl: String): Boolean {
-        val reservedPaths = "(?:dashboard|explore|search|login|register|settings|inbox|likes|following|blog|tagged|policy|privacy|about|apps|help)"
-        return Regex("""^https?://(?:[a-z0-9-]+\.)?tumblr\.com/(?:post/\d+|video/[^/?#]+/\d+|(?!$reservedPaths(?:/|$))[a-z0-9-]+/\d+)""").containsMatchIn(lowerUrl)
-    }
-
-    private fun isLikeeVideoLink(lowerUrl: String): Boolean {
-        return Regex("""^https?://(?:[a-z0-9-]+\.)?likee\.video/(?:@[^/?#]+/video/[a-z0-9_-]+|[^/?#]+/video/[a-z0-9_-]+|(?:v|s|video)/[a-z0-9_-]+)""").containsMatchIn(lowerUrl)
-    }
-
-    fun addBookmark(title: String, url: String) {
-        val newBookmark = BookmarkItem(
-            id = System.currentTimeMillis().toString(),
-            title = title.ifBlank { "Bookmark" },
-            url = url
-        )
-        val updated = listOf(newBookmark) + _bookmarks.value.filter { it.url != url }
-        _bookmarks.value = updated
-        saveBookmarks()
-    }
-
-    fun removeBookmark(id: String) {
-        _bookmarks.value = _bookmarks.value.filter { it.id != id }
-        saveBookmarks()
-    }
-
-    private fun saveBookmarks() {
-        try {
-            val arr = JSONArray()
-            for (b in _bookmarks.value) {
-                val obj = JSONObject().apply {
-                    put("id", b.id)
-                    put("title", b.title)
-                    put("url", b.url)
-                }
-                arr.put(obj)
-            }
-            prefs.edit().putString(KEY_BOOKMARKS, arr.toString()).apply()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save bookmarks", e)
-        }
-    }
-
-    private fun loadBookmarks() {
-        try {
-            val json = prefs.getString(KEY_BOOKMARKS, null)
-            if (json.isNullOrBlank()) {
-                // Initial default bookmarks matching the screenshot
-                _bookmarks.value = listOf(
-                    BookmarkItem("1", "YouTube", "https://youtube.com"),
-                    BookmarkItem("2", "Facebook", "https://facebook.com"),
-                    BookmarkItem("3", "Twitter", "https://twitter.com")
-                )
-                saveBookmarks()
-                return
-            }
-            val arr = JSONArray(json)
-            val list = mutableListOf<BookmarkItem>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                list.add(
-                    BookmarkItem(
-                        id = obj.optString("id", System.currentTimeMillis().toString()),
-                        title = obj.optString("title", "Bookmark"),
-                        url = obj.optString("url", "")
-                    )
-                )
-            }
-            _bookmarks.value = list
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load bookmarks", e)
-        }
-    }
 
     private fun buildCurrentConfig(title: String, url: String): DownloadConfig {
         return DownloadConfig(

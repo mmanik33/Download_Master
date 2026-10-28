@@ -662,7 +662,7 @@ fun SettingsScreen(
                     onClick = {
                         val sendIntent = Intent().apply {
                             action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, "Download Master - 1000+ Websites Video & Audio Downloader: https://github.com")
+                            putExtra(Intent.EXTRA_TEXT, "Download Master - 1000+ Websites Video & Audio Downloader: https://github.com/mmanik33/Download_Master")
                             type = "text/plain"
                         }
                         context.startActivity(Intent.createChooser(sendIntent, "Share Download Master"))

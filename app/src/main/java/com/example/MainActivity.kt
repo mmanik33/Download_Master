@@ -31,10 +31,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,8 +67,6 @@ import com.example.ui.MainViewModel
 import com.example.ui.components.CookieManagerDialog
 import com.example.ui.components.EngineUpdateDialog
 import com.example.ui.components.VideoQualitySelectionSheet
-import com.example.ui.screens.BrowserScreen
-import com.example.ui.screens.DownloadsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.state.DownloadUiState
@@ -120,13 +115,7 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
     val ytDlpVersion by DownloadMasterApp.ytDlpVersion.collectAsState()
     val historyItems by viewModel.downloadHistory.collectAsState()
 
-    val browserUrlInput by viewModel.browserUrlInput.collectAsState()
-    val activeBrowserUrl by viewModel.activeBrowserUrl.collectAsState()
-    val detectedVideoUrl by viewModel.detectedBrowserVideoUrl.collectAsState()
-    val bookmarks by viewModel.bookmarks.collectAsState()
-
     val embedThumbnail by viewModel.embedThumbnail.collectAsState()
-    val embedMetadata by viewModel.embedMetadata.collectAsState()
     val useAria2c by viewModel.useAria2c.collectAsState()
     val useWifiOnly by viewModel.useWifiOnly.collectAsState()
     val maxConcurrent by viewModel.maxConcurrentDownloads.collectAsState()
@@ -186,7 +175,7 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
             onDismiss = { viewModel.resetToIdle() },
             onDownloadSelected = { quality, isAudioOnly, audioFormat, formatId ->
                 viewModel.startDownloadWithQuality(readyState.mediaInfo, quality, isAudioOnly, formatId)
-                viewModel.selectTab(MainTab.DOWNLOADS)
+                viewModel.selectTab(MainTab.HOME)
             }
         )
     }
@@ -287,37 +276,7 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
                     )
                 )
 
-                // Tab 2: Downloads
-                NavigationBarItem(
-                    selected = currentTab == MainTab.DOWNLOADS,
-                    onClick = { viewModel.selectTab(MainTab.DOWNLOADS) },
-                    icon = { Icon(Icons.Default.Download, contentDescription = "Downloads") },
-                    label = { Text("Downloads", fontSize = 11.sp, fontWeight = if (currentTab == MainTab.DOWNLOADS) FontWeight.Bold else FontWeight.Normal) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.White,
-                        selectedTextColor = colors.primary,
-                        unselectedIconColor = colors.textSecondary,
-                        unselectedTextColor = colors.textSecondary,
-                        indicatorColor = colors.primary
-                    )
-                )
-
-                // Tab 3: Browser
-                NavigationBarItem(
-                    selected = currentTab == MainTab.BROWSER,
-                    onClick = { viewModel.selectTab(MainTab.BROWSER) },
-                    icon = { Icon(Icons.Default.Public, contentDescription = "Browser") },
-                    label = { Text("Browser", fontSize = 11.sp, fontWeight = if (currentTab == MainTab.BROWSER) FontWeight.Bold else FontWeight.Normal) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.White,
-                        selectedTextColor = colors.primary,
-                        unselectedIconColor = colors.textSecondary,
-                        unselectedTextColor = colors.textSecondary,
-                        indicatorColor = colors.primary
-                    )
-                )
-
-                // Tab 4: Settings
+                // Tab 2: Settings
                 NavigationBarItem(
                     selected = currentTab == MainTab.SETTINGS,
                     onClick = { viewModel.selectTab(MainTab.SETTINGS) },
@@ -371,32 +330,11 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
                             },
                             onMenuClicked = {
                                 viewModel.selectTab(MainTab.SETTINGS)
-                            }
-                        )
-                    }
-
-                    MainTab.DOWNLOADS -> {
-                        DownloadsScreen(
-                            viewModel = viewModel,
-                            uiState = uiState,
+                            },
                             historyItems = historyItems,
                             onReDownload = { url ->
                                 viewModel.onUrlInputChanged(url)
                                 viewModel.parseMediaUrl(url)
-                                viewModel.selectTab(MainTab.HOME)
-                            }
-                        )
-                    }
-
-                    MainTab.BROWSER -> {
-                        BrowserScreen(
-                            viewModel = viewModel,
-                            browserUrlInput = browserUrlInput,
-                            activeUrl = activeBrowserUrl,
-                            detectedVideoUrl = detectedVideoUrl,
-                            bookmarks = bookmarks,
-                            onDownloadVideoDetected = { videoUrl ->
-                                viewModel.parseMediaUrl(videoUrl)
                             }
                         )
                     }
