@@ -65,13 +65,13 @@ fun CookieManagerDialog(
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Cookie Settings")
+                Text("Account Login & Access")
             }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "Bypass bot challenges & sign-in requirements for YouTube and restricted videos:",
+                    text = "Unlock member-only and age-restricted videos:",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -94,7 +94,7 @@ fun CookieManagerDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Or paste Netscape cookies.txt manually:",
+                    text = "Or paste login data manually:",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -102,8 +102,8 @@ fun CookieManagerDialog(
                 OutlinedTextField(
                     value = cookiesText,
                     onValueChange = { cookiesText = it },
-                    label = { Text("cookies.txt content") },
-                    placeholder = { Text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t...") },
+                    label = { Text("Login data") },
+                    placeholder = { Text("Paste login data here...") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(140.dp)
@@ -121,7 +121,7 @@ fun CookieManagerDialog(
                 },
                 modifier = Modifier.testTag("save_cookies_button")
             ) {
-                Text("Save Cookies")
+                Text("Save")
             }
         },
         dismissButton = {
@@ -137,7 +137,7 @@ fun CookieManagerDialog(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Delete,
-                            contentDescription = "Clear Cookies",
+                            contentDescription = "Clear Login",
                             tint = MaterialTheme.colorScheme.error
                         )
                     }

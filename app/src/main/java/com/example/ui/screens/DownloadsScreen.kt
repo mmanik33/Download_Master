@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.ui.text.font.FontWeight
 import com.example.model.DownloadHistoryItem
+import com.example.model.DownloadStage
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.filled.Search
@@ -111,7 +112,6 @@ fun DownloadsScreen(
 
     val activeDownloads by viewModel.activeDownloads.collectAsStateWithLifecycle()
     val downloadingCount = activeDownloads.size
-    val completedCount = historyItems.size
 
     var showCancelDownloadDialog by remember { mutableStateOf(false) }
     var cancelProcessId by remember { mutableStateOf<String?>(null) }
@@ -298,14 +298,14 @@ fun DownloadsScreen(
         AlertDialog(
             onDismissRequest = { fileInfoItem = null },
             containerColor = colors.surface,
-            title = { Text("Media Information", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text("File Details", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Title: ${fileInfoItem?.title}", color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
                     Text("Status: ${fileInfoItem?.status}", color = colors.textSecondary)
                     Text("Format: ${if (fileInfoItem?.isAudioOnly == true) "Audio" else "Video"} (${fileInfoItem?.resolution})", color = colors.textSecondary)
-                    Text("WiFi Only: ${if (fileInfoItem?.wifiOnly == true) "Yes" else "No"}", color = colors.textSecondary)
-                    Text("Resumable: ${if (fileInfoItem?.isResumable == true) "Yes" else "No"}", color = colors.textSecondary)
+                    Text("Wi-Fi Only: ${if (fileInfoItem?.wifiOnly == true) "Yes" else "No"}", color = colors.textSecondary)
+                    Text("Can Resume: ${if (fileInfoItem?.isResumable == true) "Yes" else "No"}", color = colors.textSecondary)
                     Text("Size: ${fileInfoItem?.fileSizeFormatted}", color = colors.textSecondary)
                     Text("Saved at: ${fileInfoItem?.localFilePath}", color = colors.textSecondary)
                 }
@@ -437,7 +437,7 @@ fun DownloadsScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Search title or URL...", color = colors.textSecondary, fontSize = 13.sp) },
+                            placeholder = { Text("Search title or link...", color = colors.textSecondary, fontSize = 13.sp) },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color.Transparent,
@@ -518,7 +518,8 @@ fun DownloadsScreen(
                             downloadingState.isPaused -> "Paused"
                             else -> downloadingState.progress.speedText
                         },
-                        stageText = if (downloadingState.isPaused) "PAUSED" else downloadingState.progress.stage.name,
+                        etaText = downloadingState.progress.etaText,
+                        stageText = if (downloadingState.isPaused) "Paused" else downloadingState.progress.stage.toPlainLabel(),
                         isPaused = downloadingState.isPaused,
                         onPauseResume = { viewModel.togglePauseResumeDownload(downloadingState.processId) },
                         onCancel = { 
@@ -598,6 +599,7 @@ private fun ActiveDownloadCard(
     totalMB: Double = 0.0,
     progressText: String?,
     speedText: String,
+    etaText: String = "--:--",
     stageText: String,
     isPaused: Boolean,
     onPauseResume: () -> Unit,
@@ -752,11 +754,11 @@ private fun ActiveDownloadCard(
                 val cleanStatus = when {
                     speedText == "Waiting for Wi-Fi" -> "Waiting for Wi-Fi"
                     isPaused -> "Paused • Tap play to resume"
-                    progressPercent <= 0 -> "Preparing download engine..."
-                    stageText.contains("MERG", ignoreCase = true) -> "Merging video & audio..."
-                    stageText.contains("AUDIO", ignoreCase = true) -> "Converting audio track..."
-                    stageText.contains("META", ignoreCase = true) -> "Finalizing media file..."
-                    else -> speedText
+                    progressPercent <= 0 -> "Preparing download..."
+                    stageText.equals("Merging", ignoreCase = true) -> "Merging video & audio..."
+                    stageText.equals("Converting", ignoreCase = true) -> "Converting audio..."
+                    stageText.equals("Finishing", ignoreCase = true) -> "Finishing file..."
+                    else -> "$speedText • ETA $etaText"
                 }
 
                 Text(
@@ -879,8 +881,18 @@ private fun CompletedDownloadCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
+                val completedStatsText = buildList {
+                    add(if (item.isAudioOnly) "Audio" else "Video")
+                    add(item.fileSizeFormatted)
+                    if (item.elapsedTimeFormatted.isNotBlank()) {
+                        add(item.elapsedTimeFormatted)
+                    }
+                    if (item.averageSpeedFormatted.isNotBlank()) {
+                        add(item.averageSpeedFormatted)
+                    }
+                }.joinToString(" • ")
                 Text(
-                    text = "${if (item.isAudioOnly) "AUDIO" else "VIDEO"} • ${item.fileSizeFormatted}",
+                    text = completedStatsText,
                     color = colors.textSecondary,
                     fontSize = 11.sp
                 )
@@ -938,7 +950,7 @@ private fun CompletedDownloadCard(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Media Info", color = colors.textPrimary) },
+                        text = { Text("File Details", color = colors.textPrimary) },
                         leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = colors.textPrimary) },
                         onClick = {
                             showMenu = false
@@ -990,6 +1002,19 @@ private fun EmptyDownloadsView(message: String = "No downloads yet") {
             modifier = Modifier.padding(horizontal = 24.dp)
         )
     }
+}
+
+private fun DownloadStage.toPlainLabel(): String = when (this) {
+    DownloadStage.DOWNLOADING -> "Downloading"
+    DownloadStage.INITIALIZING -> "Connecting"
+    DownloadStage.MERGING_FORMATS -> "Merging"
+    DownloadStage.EXTRACTING_AUDIO -> "Converting"
+    DownloadStage.EMBEDDING_METADATA -> "Finishing"
+    DownloadStage.QUEUED -> "Queued"
+    DownloadStage.PAUSED -> "Paused"
+    DownloadStage.COMPLETED -> "Completed"
+    DownloadStage.FAILED -> "Failed"
+    DownloadStage.CANCELLED -> "Cancelled"
 }
 
 private fun resolveMediaUri(context: Context, filePath: String): Uri? {

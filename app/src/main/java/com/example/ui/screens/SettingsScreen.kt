@@ -89,23 +89,18 @@ fun SettingsScreen(
     viewModel: MainViewModel,
     ytDlpVersion: String,
     embedThumbnail: Boolean,
-    embedMetadata: Boolean,
     useAria2c: Boolean,
     useWifiOnly: Boolean,
     maxConcurrent: Int,
-    defaultQuality: String,
-    downloadLocation: String,
     onOpenCookieManager: () -> Unit,
     onCheckEngineUpdate: () -> Unit
 ) {
     val context = LocalContext.current
     var showDeveloperInfoDialog by remember { mutableStateOf(false) }
     val colors = AppTheme.colors
-    val themeMode by viewModel.themeMode.collectAsState()
     val colorPalette by viewModel.colorPalette.collectAsState()
 
     var showConcurrentDialog by remember { mutableStateOf(false) }
-    var showQualityPrefDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
     var showDisclaimerDialog by remember { mutableStateOf(false) }
@@ -406,46 +401,6 @@ fun SettingsScreen(
         )
     }
 
-    if (showQualityPrefDialog) {
-        AlertDialog(
-            onDismissRequest = { showQualityPrefDialog = false },
-            containerColor = colors.surface,
-            title = { Text("Default Video Quality", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    listOf("Ask Each Time", "Highest Quality (4K/1080p)", "720p HD", "Audio Only (MP3)").forEach { q ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    viewModel.setDefaultQualityPreference(q)
-                                    showQualityPrefDialog = false
-                                }
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = defaultQuality == q,
-                                onClick = {
-                                    viewModel.setDefaultQualityPreference(q)
-                                    showQualityPrefDialog = false
-                                },
-                                colors = RadioButtonDefaults.colors(selectedColor = colors.primary)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(q, color = colors.textPrimary)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showQualityPrefDialog = false }) {
-                    Text("Done", color = colors.primary)
-                }
-            }
-        )
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -630,16 +585,16 @@ fun SettingsScreen(
                     onCheckedChange = { viewModel.setUseWifiOnly(it) }
                 )
 
-                // Turbo Speed Booster (Simplified from Aria2c)
+                // Turbo Speed Booster
                 SettingSwitchItem(
                     icon = Icons.Default.Speed,
                     title = "Turbo Download Speed",
-                    subtitle = "Multi-connection booster for maximum speed",
+                    subtitle = "Download files faster",
                     checked = useAria2c,
                     onCheckedChange = { viewModel.setUseAria2c(it) }
                 )
 
-                // Cover Art & Audio Info (Simplified from Embed Thumbnail & Metadata)
+                // Cover Art & Audio Info
                 SettingSwitchItem(
                     icon = Icons.Default.Photo,
                     title = "Save Video Cover & Audio Info",
@@ -659,10 +614,10 @@ fun SettingsScreen(
                     onClick = onOpenCookieManager
                 )
 
-                // Downloader Core Engine
+                // Downloader Updates
                 SettingClickableItem(
                     icon = Icons.Default.Sync,
-                    title = "Downloader Core Engine",
+                    title = "Downloader Updates",
                     subtitle = "Version: $ytDlpVersion • Tap to check for updates",
                     onClick = onCheckEngineUpdate
                 )
@@ -726,7 +681,7 @@ fun SettingsScreen(
                 SettingClickableItem(
                     icon = Icons.Default.Security,
                     title = "Privacy Policy",
-                    subtitle = "100% on-device processing & zero tracking",
+                    subtitle = "Everything stays on your device, no tracking",
                     onClick = { showPrivacyDialog = true }
                 )
 
@@ -736,7 +691,7 @@ fun SettingsScreen(
                 SettingClickableItem(
                     icon = Icons.Default.Info,
                     title = "About app",
-                    subtitle = "Download Master $versionName info & open-source licenses",
+                    subtitle = "App version $versionName and details",
                     onClick = { showAboutDialog = true }
                 )
             }

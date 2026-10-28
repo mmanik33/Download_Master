@@ -38,8 +38,6 @@ class DownloadForegroundService : Service() {
         const val ACTION_START_DOWNLOAD = "action_start_download"
         const val ACTION_TOGGLE_PAUSE = "action_toggle_pause"
         const val ACTION_CANCEL_DOWNLOAD = "action_cancel_download"
-        const val ACTION_PAUSE_DOWNLOAD = "action_pause_download"
-        const val ACTION_RESUME_DOWNLOAD = "action_resume_download"
         const val ACTION_WIFI_SETTING_CHANGED = "action_wifi_setting_changed"
 
         const val EXTRA_URL = "extra_url"
@@ -120,7 +118,13 @@ class DownloadForegroundService : Service() {
         val id: String
         data class Started(override val id: String, val title: String, val config: DownloadConfig) : DownloadEvent
         data class Progress(override val id: String, val progress: DownloadProgress, val isPaused: Boolean) : DownloadEvent
-        data class Completed(override val id: String, val file: File, val title: String) : DownloadEvent
+        data class Completed(
+            override val id: String,
+            val file: File,
+            val title: String,
+            val elapsedTimeFormatted: String = "",
+            val averageSpeedFormatted: String = ""
+        ) : DownloadEvent
         data class Failed(override val id: String, val error: String) : DownloadEvent
         data class Cancelled(override val id: String) : DownloadEvent
     }
@@ -132,6 +136,7 @@ class DownloadForegroundService : Service() {
     class ActiveJobState(
         val processId: String,
         val config: DownloadConfig,
+        val startTimeMs: Long = System.currentTimeMillis(),
         var job: Job? = null,
         var isPaused: Boolean = false,
         var isWaitingForWifi: Boolean = false,
@@ -448,9 +453,9 @@ class DownloadForegroundService : Service() {
 
                 val cleanLineText = when (stage) {
                     DownloadStage.INITIALIZING -> "Preparing download..."
-                    DownloadStage.EXTRACTING_AUDIO -> "Extracting audio track..."
+                    DownloadStage.EXTRACTING_AUDIO -> "Converting audio..."
                     DownloadStage.MERGING_FORMATS -> "Merging video & audio..."
-                    DownloadStage.EMBEDDING_METADATA -> "Finalizing media..."
+                    DownloadStage.EMBEDDING_METADATA -> "Finishing file..."
                     else -> line
                 }
 
@@ -479,8 +484,23 @@ class DownloadForegroundService : Service() {
 
             result.fold(
                 onSuccess = { file ->
-                    Log.i(TAG, "Download completed successfully: ${file.absolutePath}")
-                    _downloadEvents.emit(DownloadEvent.Completed(jobState.processId, file, jobState.config.title))
+                    val endTimeMs = System.currentTimeMillis()
+                    val elapsedMs = (endTimeMs - jobState.startTimeMs).coerceAtLeast(1L)
+                    val elapsedSeconds = (elapsedMs / 1000L).coerceAtLeast(1L)
+                    val elapsedFormatted = formatElapsedTime(elapsedSeconds)
+                    val avgBytesPerSec = file.length().toDouble() / (elapsedMs / 1000.0)
+                    val averageSpeedFormatted = formatAverageSpeed(avgBytesPerSec)
+
+                    Log.i(TAG, "Download completed successfully: ${file.absolutePath} ($elapsedFormatted, $averageSpeedFormatted)")
+                    _downloadEvents.emit(
+                        DownloadEvent.Completed(
+                            id = jobState.processId,
+                            file = file,
+                            title = jobState.config.title,
+                            elapsedTimeFormatted = elapsedFormatted,
+                            averageSpeedFormatted = averageSpeedFormatted
+                        )
+                    )
                     showCompletionNotification(jobState.config.title, file)
                     removeJobAndCheckStop(jobState.processId)
                 },
@@ -613,6 +633,29 @@ class DownloadForegroundService : Service() {
             "KIB", "KB" -> value / 1024.0
             "B" -> value / (1024.0 * 1024.0)
             else -> null
+        }
+    }
+
+    private fun formatElapsedTime(elapsedSeconds: Long): String {
+        val totalSecs = elapsedSeconds.coerceAtLeast(1L)
+        val hours = totalSecs / 3600L
+        val minutes = (totalSecs % 3600L) / 60L
+        val seconds = totalSecs % 60L
+        return when {
+            hours > 0L -> "${hours}h ${minutes}m ${seconds}s"
+            minutes > 0L -> "${minutes}m ${seconds}s"
+            else -> "${seconds}s"
+        }
+    }
+
+    private fun formatAverageSpeed(bytesPerSec: Double): String {
+        if (bytesPerSec <= 0.0 || bytesPerSec.isNaN() || bytesPerSec.isInfinite()) return ""
+        val mbPerSec = bytesPerSec / (1024.0 * 1024.0)
+        val kbPerSec = bytesPerSec / 1024.0
+        return when {
+            mbPerSec >= 1.0 -> String.format(java.util.Locale.US, "%.1f MB/s", mbPerSec)
+            kbPerSec >= 1.0 -> String.format(java.util.Locale.US, "%.1f KB/s", kbPerSec)
+            else -> String.format(java.util.Locale.US, "%.0f B/s", bytesPerSec)
         }
     }
 

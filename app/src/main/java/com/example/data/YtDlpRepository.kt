@@ -31,6 +31,21 @@ import java.net.URLEncoder
 
 class YtDlpRepository(private val context: Context) {
 
+    enum class CacheSource {
+        MEMORY,
+        DISK
+    }
+
+    data class CacheLookupResult(
+        val media: MediaModel,
+        val source: CacheSource
+    )
+
+    private data class CachedMetadataEntry(
+        val media: MediaModel,
+        val timestampMs: Long
+    )
+
     companion object {
         private const val TAG = "YtDlpRepository"
         const val DOWNLOADS_SUBDIR = "DownloadMaster"
@@ -38,7 +53,55 @@ class YtDlpRepository(private val context: Context) {
         private const val DEFAULT_MEDIASTORE_RELATIVE_PATH = "Download/DownloadMaster"
         private const val PREFS_NAME = "download_master_prefs"
         private const val KEY_DOWNLOAD_PATH = "key_download_path"
-        private val metadataCache = LruCache<String, MediaModel>(50)
+        private const val METADATA_CACHE_FILE_NAME = "metadata_cache_v1.json"
+        private const val METADATA_CACHE_TTL_MS = 24L * 60L * 60L * 1000L
+        private const val MAX_DISK_CACHE_ENTRIES = 50
+        private val diskCacheLock = Any()
+        private val metadataCache = LruCache<String, CachedMetadataEntry>(50)
+    }
+
+    fun getMemoryCachedMetadata(url: String): MediaModel? {
+        val cleanUrl = url.trim()
+        if (cleanUrl.isBlank()) return null
+        val entry = metadataCache.get(cleanUrl) ?: return null
+        val now = System.currentTimeMillis()
+        if (now - entry.timestampMs > METADATA_CACHE_TTL_MS) {
+            metadataCache.remove(cleanUrl)
+            return null
+        }
+        return entry.media
+    }
+
+    fun getDiskCachedMetadata(url: String): MediaModel? {
+        val cleanUrl = url.trim()
+        if (cleanUrl.isBlank()) return null
+        return readFromDiskCache(cleanUrl)?.media
+    }
+
+    /**
+     * Lookup order: memory cache first, then persistent disk cache (with 24-hour TTL).
+     */
+    fun getCachedMetadata(url: String): CacheLookupResult? {
+        val cleanUrl = url.trim()
+        if (cleanUrl.isBlank()) return null
+
+        getMemoryCachedMetadata(cleanUrl)?.let { memMedia ->
+            Log.d(TAG, "Memory metadata cache hit for: $cleanUrl")
+            return CacheLookupResult(memMedia, CacheSource.MEMORY)
+        }
+
+        readFromDiskCache(cleanUrl)?.let { diskEntry ->
+            Log.d(TAG, "Disk metadata cache hit for: $cleanUrl")
+            return CacheLookupResult(diskEntry.media, CacheSource.DISK)
+        }
+
+        return null
+    }
+
+    private fun storeInCaches(cleanUrl: String, media: MediaModel) {
+        val now = System.currentTimeMillis()
+        metadataCache.put(cleanUrl, CachedMetadataEntry(media, now))
+        writeToDiskCache(cleanUrl, media, now)
     }
 
     /**
@@ -46,16 +109,23 @@ class YtDlpRepository(private val context: Context) {
      * Uses optimized yt-dlp arguments with fast timeout handling to guarantee
      * all resolutions (144p to 4K+) and audio tracks are extracted quickly.
      */
-    suspend fun extractMetadata(url: String): Result<MediaModel> = withContext(Dispatchers.IO) {
+    suspend fun extractMetadata(url: String, forceRefresh: Boolean = false): Result<MediaModel> = withContext(Dispatchers.IO) {
         val cleanUrl = url.trim()
         if (cleanUrl.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("URL cannot be empty"))
         }
 
-        // Return from memory cache if available for instant response
-        metadataCache.get(cleanUrl)?.let { cached ->
-            Log.d(TAG, "Returning cached metadata for: $cleanUrl")
-            return@withContext Result.success(cached)
+        if (!forceRefresh) {
+            // 1. Lookup memory cache first
+            getMemoryCachedMetadata(cleanUrl)?.let { cached ->
+                Log.d(TAG, "Returning memory-cached metadata for: $cleanUrl")
+                return@withContext Result.success(cached)
+            }
+            // 2. Lookup disk cache second (24-hour TTL)
+            getDiskCachedMetadata(cleanUrl)?.let { diskCached ->
+                Log.d(TAG, "Returning disk-cached metadata for: $cleanUrl")
+                return@withContext Result.success(diskCached)
+            }
         }
 
         val isTikTok = isTikTokUrl(cleanUrl)
@@ -67,12 +137,12 @@ class YtDlpRepository(private val context: Context) {
         if (isTikTok) {
             val tikTokModel = extractTikTokFast(cleanUrl)
             if (tikTokModel != null) {
-                metadataCache.put(cleanUrl, tikTokModel)
+                storeInCaches(cleanUrl, tikTokModel)
                 return@withContext Result.success(tikTokModel)
             }
         }
 
-        ensureEngineReady()
+        ensureYoutubeDLReady()
         val cookiesFile = getCookiesFile()
 
         // List of candidate extraction configurations to try
@@ -117,6 +187,9 @@ class YtDlpRepository(private val context: Context) {
         var lastException: Exception? = null
 
         for ((index, strategy) in strategies.withIndex()) {
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { job ->
+                if (!job.isActive) throw kotlinx.coroutines.CancellationException()
+            }
             try {
                 Log.d(TAG, "Fetching media metadata (strategy #$index) for: $cleanUrl")
                 val request = YoutubeDLRequest(cleanUrl)
@@ -214,7 +287,7 @@ class YtDlpRepository(private val context: Context) {
                 }
 
                 val mediaModel = MediaModel(
-                    id = videoInfo.id ?: System.currentTimeMillis().toString(),
+                    id = videoInfo.id ?: cleanUrl.hashCode().toUInt().toString(),
                     title = videoInfo.title ?: "Downloaded Media",
                     uploader = videoInfo.uploader ?: videoInfo.uploaderId ?: "Unknown Creator",
                     uploaderUrl = null,
@@ -228,15 +301,17 @@ class YtDlpRepository(private val context: Context) {
                     directVideoUrl = videoInfo.url
                 )
 
-                metadataCache.put(cleanUrl, mediaModel)
+                storeInCaches(cleanUrl, mediaModel)
                 return@withContext Result.success(mediaModel)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastException = e
                 Log.w(TAG, "Strategy #$index failed: ${e.message}")
             }
         }
 
-        val finalError = lastException ?: IllegalStateException("Extraction failed")
+        val finalError = lastException ?: IllegalStateException("Could not load video info")
         Log.e(TAG, "All extraction strategies failed for $cleanUrl", finalError)
         return@withContext Result.failure(finalError)
     }
@@ -267,7 +342,7 @@ class YtDlpRepository(private val context: Context) {
                 val code = root.optInt("code", -1)
                 if (code == 0 && root.has("data")) {
                     val data = root.getJSONObject("data")
-                    val id = data.optString("id", System.currentTimeMillis().toString())
+                    val id = data.optString("id").ifBlank { cleanUrl.hashCode().toUInt().toString() }
                     val title = data.optString("title").ifBlank { "TikTok Video ($id)" }
                     val cover = data.optString("cover").takeIf { it.isNotBlank() }
                     val duration = data.optLong("duration", 0L)
@@ -393,7 +468,7 @@ class YtDlpRepository(private val context: Context) {
             try {
                 Log.d(TAG, "Attempting high-speed direct download for TikTok: ${config.url}")
                 val cleanUrl = config.url.trim()
-                val directMedia = metadataCache.get(cleanUrl) ?: extractTikTokFast(cleanUrl)
+                val directMedia = extractTikTokFast(cleanUrl)
                 val directUrl = if (config.isAudioOnly) {
                     directMedia?.availableFormats?.firstOrNull { it.isAudioOnly }?.directUrl ?: directMedia?.directVideoUrl
                 } else {
@@ -611,7 +686,7 @@ class YtDlpRepository(private val context: Context) {
                             !hasIncompleteExtension(file.name)
                     }
                     .maxByOrNull { it.lastModified() }
-                    ?: throw IllegalStateException("Download finished without producing a verified media file")
+                    ?: throw IllegalStateException("Download finished, but the file could not be saved")
 
                 verifyDownloadedMedia(newFile)
                 if (!config.isAudioOnly && targetHeight != null) {
@@ -626,7 +701,7 @@ class YtDlpRepository(private val context: Context) {
                                 "Degraded video quality on strategy $index: requested ${targetHeight}p, delivered ${actualHeight}p for '${newFile.name}'. Deleting degraded file and trying next strategy."
                             )
                             newFile.delete()
-                            throw IllegalStateException("Requested quality ${targetHeight}p not met (delivered ${actualHeight}p)")
+                            throw IllegalStateException("${targetHeight}p quality is not available for this video (got ${actualHeight}p)")
                         }
                     }
                 }
@@ -645,7 +720,7 @@ class YtDlpRepository(private val context: Context) {
 
         val finalError = if (!config.isAudioOnly && requestedTargetHeight != null && bestDeliveredHeight != null && bestDeliveredHeight!! < requestedTargetHeight) {
             IllegalStateException(
-                "Requested video quality ${requestedTargetHeight}p could not be reached across all strategies (best delivered quality was ${bestDeliveredHeight}p)"
+                "${requestedTargetHeight}p quality is not available for this video (best available is ${bestDeliveredHeight}p)"
             )
         } else {
             lastException ?: IllegalStateException("Download failed")
@@ -688,7 +763,7 @@ class YtDlpRepository(private val context: Context) {
      */
     private fun verifyDownloadedMedia(file: File) {
         if (!file.exists() || !file.isFile || file.length() <= 0L || hasIncompleteExtension(file.name)) {
-            throw IllegalStateException("Downloaded media verification failed for: ${file.name}")
+            throw IllegalStateException("Downloaded file could not be verified: ${file.name}")
         }
         val retriever = android.media.MediaMetadataRetriever()
         try {
@@ -854,17 +929,193 @@ class YtDlpRepository(private val context: Context) {
         }
     }
 
-    private fun ensureEngineReady() {
+    private fun ensureYoutubeDLReady() {
         try {
             YoutubeDL.getInstance().init(context)
         } catch (e: Exception) {
             Log.w(TAG, "YoutubeDL engine init verification: ${e.message}")
         }
+    }
+
+    private fun ensureEngineReady() {
+        ensureYoutubeDLReady()
         try {
             com.yausername.ffmpeg.FFmpeg.getInstance().init(context)
         } catch (e: Exception) {
             Log.w(TAG, "FFmpeg engine init verification: ${e.message}")
         }
+    }
+
+    private fun getDiskCacheFile(): File {
+        return File(context.cacheDir, METADATA_CACHE_FILE_NAME)
+    }
+
+    private fun readFromDiskCache(cleanUrl: String): CachedMetadataEntry? {
+        synchronized(diskCacheLock) {
+            val file = getDiskCacheFile()
+            if (!file.exists() || file.length() <= 0L) return null
+            return try {
+                val root = JSONObject(file.readText())
+                val entryObj = root.optJSONObject(cleanUrl) ?: return null
+                val timestampMs = entryObj.optLong("timestampMs", 0L)
+                val now = System.currentTimeMillis()
+                if (timestampMs <= 0L || now - timestampMs > METADATA_CACHE_TTL_MS) {
+                    root.remove(cleanUrl)
+                    writeDiskCacheRootLocked(file, root)
+                    return null
+                }
+                val mediaObj = entryObj.optJSONObject("media") ?: return null
+                val media = deserializeMediaModel(mediaObj)
+                CachedMetadataEntry(media = media, timestampMs = timestampMs)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to read metadata disk cache: ${e.message}")
+                null
+            }
+        }
+    }
+
+    private fun writeToDiskCache(cleanUrl: String, media: MediaModel, timestampMs: Long) {
+        synchronized(diskCacheLock) {
+            val file = getDiskCacheFile()
+            try {
+                val root = if (file.exists() && file.length() > 0L) {
+                    try {
+                        JSONObject(file.readText())
+                    } catch (_: Exception) {
+                        JSONObject()
+                    }
+                } else {
+                    JSONObject()
+                }
+
+                // Prune expired entries (> 24-hour TTL)
+                val validEntries = mutableListOf<Pair<String, Long>>()
+                val keysIter = root.keys()
+                val expiredKeys = mutableListOf<String>()
+                while (keysIter.hasNext()) {
+                    val key = keysIter.next()
+                    if (key == cleanUrl) continue
+                    val obj = root.optJSONObject(key)
+                    val ts = obj?.optLong("timestampMs", 0L) ?: 0L
+                    if (ts <= 0L || timestampMs - ts > METADATA_CACHE_TTL_MS) {
+                        expiredKeys.add(key)
+                    } else {
+                        validEntries.add(key to ts)
+                    }
+                }
+                for (expiredKey in expiredKeys) {
+                    root.remove(expiredKey)
+                }
+
+                // Evict oldest entries if exceeding capacity
+                if (validEntries.size >= MAX_DISK_CACHE_ENTRIES) {
+                    validEntries.sortBy { it.second }
+                    val toRemoveCount = (validEntries.size - MAX_DISK_CACHE_ENTRIES + 1).coerceAtLeast(0)
+                    for (i in 0 until toRemoveCount) {
+                        root.remove(validEntries[i].first)
+                    }
+                }
+
+                val newEntry = JSONObject().apply {
+                    put("timestampMs", timestampMs)
+                    put("media", serializeMediaModel(media))
+                }
+                root.put(cleanUrl, newEntry)
+                writeDiskCacheRootLocked(file, root)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to write metadata disk cache: ${e.message}")
+            }
+        }
+    }
+
+    private fun writeDiskCacheRootLocked(file: File, root: JSONObject) {
+        val tempFile = File(file.parentFile, "${file.name}.tmp")
+        tempFile.writeText(root.toString())
+        if (!tempFile.renameTo(file)) {
+            file.writeText(root.toString())
+            tempFile.delete()
+        }
+    }
+
+    private fun serializeMediaModel(media: MediaModel): JSONObject {
+        val formatsArray = org.json.JSONArray()
+        for (fmt in media.availableFormats) {
+            val fmtObj = JSONObject().apply {
+                put("formatId", fmt.formatId)
+                put("ext", fmt.ext)
+                if (fmt.resolution != null) put("resolution", fmt.resolution) else put("resolution", JSONObject.NULL)
+                put("width", fmt.width)
+                put("height", fmt.height)
+                put("fps", fmt.fps)
+                if (fmt.vcodec != null) put("vcodec", fmt.vcodec) else put("vcodec", JSONObject.NULL)
+                if (fmt.acodec != null) put("acodec", fmt.acodec) else put("acodec", JSONObject.NULL)
+                put("fileSize", fmt.fileSize)
+                if (fmt.formatNote != null) put("formatNote", fmt.formatNote) else put("formatNote", JSONObject.NULL)
+                put("isVideo", fmt.isVideo)
+                put("isAudioOnly", fmt.isAudioOnly)
+                if (fmt.directUrl != null) put("directUrl", fmt.directUrl) else put("directUrl", JSONObject.NULL)
+            }
+            formatsArray.put(fmtObj)
+        }
+        return JSONObject().apply {
+            put("id", media.id)
+            put("title", media.title)
+            put("uploader", media.uploader)
+            if (media.uploaderUrl != null) put("uploaderUrl", media.uploaderUrl) else put("uploaderUrl", JSONObject.NULL)
+            put("durationSeconds", media.durationSeconds)
+            if (media.thumbnailUrl != null) put("thumbnailUrl", media.thumbnailUrl) else put("thumbnailUrl", JSONObject.NULL)
+            put("webpageUrl", media.webpageUrl)
+            put("extractorName", media.extractorName)
+            if (media.description != null) put("description", media.description) else put("description", JSONObject.NULL)
+            if (media.viewCount != null) put("viewCount", media.viewCount) else put("viewCount", JSONObject.NULL)
+            if (media.directVideoUrl != null) put("directVideoUrl", media.directVideoUrl) else put("directVideoUrl", JSONObject.NULL)
+            put("availableFormats", formatsArray)
+        }
+    }
+
+    private fun JSONObject.optNullableString(key: String): String? {
+        return if (has(key) && !isNull(key)) getString(key) else null
+    }
+
+    private fun deserializeMediaModel(obj: JSONObject): MediaModel {
+        val formatsList = mutableListOf<FormatModel>()
+        val formatsArray = obj.optJSONArray("availableFormats")
+        if (formatsArray != null) {
+            for (i in 0 until formatsArray.length()) {
+                val fmtObj = formatsArray.optJSONObject(i) ?: continue
+                formatsList.add(
+                    FormatModel(
+                        formatId = fmtObj.optString("formatId", ""),
+                        ext = fmtObj.optString("ext", "mp4"),
+                        resolution = fmtObj.optNullableString("resolution"),
+                        width = fmtObj.optInt("width", 0),
+                        height = fmtObj.optInt("height", 0),
+                        fps = fmtObj.optDouble("fps", 0.0),
+                        vcodec = fmtObj.optNullableString("vcodec"),
+                        acodec = fmtObj.optNullableString("acodec"),
+                        fileSize = fmtObj.optLong("fileSize", 0L),
+                        formatNote = fmtObj.optNullableString("formatNote"),
+                        isVideo = fmtObj.optBoolean("isVideo", true),
+                        isAudioOnly = fmtObj.optBoolean("isAudioOnly", false),
+                        directUrl = fmtObj.optNullableString("directUrl")
+                    )
+                )
+            }
+        }
+        return MediaModel(
+            id = obj.optString("id", ""),
+            title = obj.optString("title", "Downloaded Media"),
+            uploader = obj.optString("uploader", "Unknown Creator"),
+            uploaderUrl = obj.optNullableString("uploaderUrl"),
+            durationSeconds = obj.optLong("durationSeconds", 0L),
+            thumbnailUrl = obj.optNullableString("thumbnailUrl"),
+            webpageUrl = obj.optString("webpageUrl", ""),
+            extractorName = obj.optString("extractorName", "Generic"),
+            description = obj.optNullableString("description"),
+            viewCount = if (obj.has("viewCount") && !obj.isNull("viewCount")) obj.optLong("viewCount") else null,
+            availableFormats = formatsList,
+            directVideoUrl = obj.optNullableString("directVideoUrl")
+        )
     }
 
     private fun resolveTargetHeight(config: DownloadConfig): Int? {
@@ -967,10 +1218,6 @@ class YtDlpRepository(private val context: Context) {
 
     private val pausedProcessIds = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     private val cancelledProcessIds = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
-
-    fun setPaused(processId: String, paused: Boolean) {
-        pausedProcessIds[processId] = paused
-    }
 
     fun isPaused(processId: String): Boolean = pausedProcessIds[processId] == true
 

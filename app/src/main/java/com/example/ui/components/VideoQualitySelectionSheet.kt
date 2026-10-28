@@ -310,9 +310,9 @@ fun VideoQualitySelectionSheet(
         listOf(
             QualityOption("MP3 (320kbps High Quality)", "MP3", "MP3", calculateEstimatedAudioSize(media.durationSeconds, 320), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.MP3),
             QualityOption("M4A (AAC 256kbps)", "M4A", "M4A", calculateEstimatedAudioSize(media.durationSeconds, 256), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.M4A),
-            QualityOption("FLAC (Lossless Studio)", "FLAC", "FLAC", calculateEstimatedAudioSize(media.durationSeconds, 800), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.FLAC),
-            QualityOption("Opus (High Efficiency)", "OPUS", "OPUS", calculateEstimatedAudioSize(media.durationSeconds, 160), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.OPUS),
-            QualityOption("WAV (Uncompressed)", "WAV", "WAV", calculateEstimatedAudioSize(media.durationSeconds, 1411), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.WAV)
+            QualityOption("FLAC (Lossless Quality)", "FLAC", "FLAC", calculateEstimatedAudioSize(media.durationSeconds, 800), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.FLAC),
+            QualityOption("Opus (Small File Size)", "OPUS", "OPUS", calculateEstimatedAudioSize(media.durationSeconds, 160), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.OPUS),
+            QualityOption("WAV (Original Audio)", "WAV", "WAV", calculateEstimatedAudioSize(media.durationSeconds, 1411), VideoQuality.BEST, isAudio = true, audioFormat = AudioFormat.WAV)
         )
     }
 
@@ -446,12 +446,12 @@ fun VideoQualitySelectionSheet(
                 Tab(
                     selected = selectedTabIndex == 0,
                     onClick = { selectedTabIndex = 0 },
-                    text = { Text("Video Formats", fontWeight = FontWeight.Bold, color = if (selectedTabIndex == 0) colors.textPrimary else colors.textSecondary) }
+                    text = { Text("Video", fontWeight = FontWeight.Bold, color = if (selectedTabIndex == 0) colors.textPrimary else colors.textSecondary) }
                 )
                 Tab(
                     selected = selectedTabIndex == 1,
                     onClick = { selectedTabIndex = 1 },
-                    text = { Text("Audio Extraction", fontWeight = FontWeight.Bold, color = if (selectedTabIndex == 1) colors.textPrimary else colors.textSecondary) }
+                    text = { Text("Audio Only", fontWeight = FontWeight.Bold, color = if (selectedTabIndex == 1) colors.textPrimary else colors.textSecondary) }
                 )
             }
 

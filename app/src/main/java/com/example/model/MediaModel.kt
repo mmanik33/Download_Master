@@ -48,14 +48,4 @@ data class FormatModel(
     val isVideo: Boolean = true,
     val isAudioOnly: Boolean = false,
     val directUrl: String? = null
-) {
-    val displayLabel: String
-        get() {
-            return when {
-                height > 0 -> "${height}p ($ext)"
-                resolution != null && resolution.isNotBlank() && resolution != "audio only" -> "$resolution ($ext)"
-                isAudioOnly -> "Audio Only ($ext)"
-                else -> "${ext.uppercase()} - $formatId"
-            }
-        }
-}
+)

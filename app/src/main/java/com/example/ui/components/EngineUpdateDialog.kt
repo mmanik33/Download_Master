@@ -48,7 +48,7 @@ fun EngineUpdateDialog(
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("yt-dlp Engine Update")
+                Text("Downloader Updates")
             }
         },
         text = {
@@ -62,7 +62,7 @@ fun EngineUpdateDialog(
                 when (updateState) {
                     is EngineUpdateState.Idle -> {
                         Text(
-                            text = "Download Master embeds yt-dlp python binaries natively. You can check for and download the latest stable yt-dlp release dynamically to support new extractors.",
+                            text = "Check for and download the latest update to keep video downloads working smoothly.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -78,7 +78,7 @@ fun EngineUpdateDialog(
                                 strokeWidth = 2.dp
                             )
                             Text(
-                                text = "Checking and downloading latest yt-dlp release...",
+                                text = "Checking for updates...",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }

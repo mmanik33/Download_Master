@@ -42,5 +42,7 @@ data class DownloadHistoryItem(
     val status: String = "Completed",
     val resolution: String = "",
     val wifiOnly: Boolean = false,
-    val isResumable: Boolean = false
+    val isResumable: Boolean = false,
+    val elapsedTimeFormatted: String = "",
+    val averageSpeedFormatted: String = ""
 )

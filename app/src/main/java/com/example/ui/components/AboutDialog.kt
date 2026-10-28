@@ -85,16 +85,16 @@ fun AboutDialog(
                     val versionName = packageInfo.versionName ?: "1.0.0"
                     Text("Version $versionName (Latest Release)", fontSize = 12.sp, color = PrimaryPurple)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("• Embedded yt-dlp Engine: $ytDlpVersion", fontSize = 12.sp, color = colors.textSecondary)
-                    Text("• Embedded FFmpeg 6.0 (Hardware-accelerated muxing)", fontSize = 12.sp, color = colors.textSecondary)
-                    Text("• Aria2c Engine (16-thread connection booster)", fontSize = 12.sp, color = colors.textSecondary)
-                    Text("• Jetpack Compose & Material 3 UI", fontSize = 12.sp, color = colors.textSecondary)
+                    Text("• Downloader version: $ytDlpVersion", fontSize = 12.sp, color = colors.textSecondary)
+                    Text("• Built-in video & audio converter", fontSize = 12.sp, color = colors.textSecondary)
+                    Text("• Fast multi-connection downloads", fontSize = 12.sp, color = colors.textSecondary)
+                    Text("• Clean, modern design", fontSize = 12.sp, color = colors.textSecondary)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Download Master allows you to save videos and audio streams on your device for offline consumption, backup, and personal archiving. 1000+ streaming sites supported.",
+                    text = "Download Master lets you save videos and audio to your device for offline viewing and listening. Over 1000 websites are supported.",
                     fontSize = 12.sp,
                     color = colors.textSecondary,
                     lineHeight = 17.sp
@@ -103,7 +103,7 @@ fun AboutDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Open-source core powered by yt-dlp, FFmpeg, and aria2 under Unlicense/GPL.",
+                    text = "Built with open-source download and media tools.",
                     fontSize = 11.sp,
                     color = colors.textSecondary
                 )

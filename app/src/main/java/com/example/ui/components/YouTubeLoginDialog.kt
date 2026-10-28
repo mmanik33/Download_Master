@@ -119,7 +119,7 @@ fun YouTubeLoginDialog(
                     ) {
                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Use Cookies")
+                        Text("Save Login")
                     }
                 }
 
@@ -133,7 +133,7 @@ fun YouTubeLoginDialog(
                 }
 
                 Text(
-                    text = "Log into your account or solve the verification prompt, then click 'Use Cookies'.",
+                    text = "Sign in to your account, then tap 'Save Login'.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)

@@ -70,7 +70,7 @@ fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "1. Zero Data Collection: Download Master does not track your downloads, search history, or personal identifiers. All downloading logic runs directly on your local device.",
+                    text = "1. No Data Collection: Download Master does not track your downloads, search history, or personal info. Everything runs directly on your device.",
                     fontSize = 12.sp,
                     color = colors.textSecondary,
                     lineHeight = 17.sp
@@ -79,7 +79,7 @@ fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "2. No External Servers: Videos and audio streams are directly transferred between your device and the media host. We do not proxy or store files on intermediate servers.",
+                    text = "2. Direct Downloads: Videos and audio are downloaded straight from the website to your phone. Your files never pass through our servers.",
                     fontSize = 12.sp,
                     color = colors.textSecondary,
                     lineHeight = 17.sp
@@ -88,7 +88,7 @@ fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "3. Storage & Permissions: Storage access is used solely to write downloaded media files into your public Movies/Music directories. Notification permission is used strictly to display download speed and progress.",
+                    text = "3. Storage & Notifications: Storage access is only used to save your downloaded files. Notifications are only used to show download progress.",
                     fontSize = 12.sp,
                     color = colors.textSecondary,
                     lineHeight = 17.sp

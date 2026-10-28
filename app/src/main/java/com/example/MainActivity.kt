@@ -119,7 +119,6 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
     val engineUpdateState by viewModel.engineUpdateState.collectAsState()
     val ytDlpVersion by DownloadMasterApp.ytDlpVersion.collectAsState()
     val historyItems by viewModel.downloadHistory.collectAsState()
-    val historySearchQuery by viewModel.historySearchQuery.collectAsState()
 
     val browserUrlInput by viewModel.browserUrlInput.collectAsState()
     val activeBrowserUrl by viewModel.activeBrowserUrl.collectAsState()
@@ -131,8 +130,6 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
     val useAria2c by viewModel.useAria2c.collectAsState()
     val useWifiOnly by viewModel.useWifiOnly.collectAsState()
     val maxConcurrent by viewModel.maxConcurrentDownloads.collectAsState()
-    val defaultQuality by viewModel.defaultQualityPreference.collectAsState()
-    val downloadLocation by viewModel.downloadLocation.collectAsState()
 
     var showCookieDialog by remember { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
@@ -251,13 +248,13 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
             onSaveCookies = { text ->
                 val success = viewModel.saveCookies(text)
                 if (success) {
-                    coroutineScope.launch { snackbarHostState.showSnackbar("Cookies updated successfully") }
+                    coroutineScope.launch { snackbarHostState.showSnackbar("Login saved") }
                 }
             },
             onClearCookies = {
                 val success = viewModel.clearCookies()
                 if (success) {
-                    coroutineScope.launch { snackbarHostState.showSnackbar("Cookies cleared") }
+                    coroutineScope.launch { snackbarHostState.showSnackbar("Login cleared") }
                 }
             }
         )
@@ -372,9 +369,6 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
                                     }
                                 }
                             },
-                            onPlatformClicked = { platform ->
-                                viewModel.navigateBrowserTo(platform.homeUrl)
-                            },
                             onMenuClicked = {
                                 viewModel.selectTab(MainTab.SETTINGS)
                             }
@@ -412,12 +406,9 @@ fun DownloadMasterApp(viewModel: MainViewModel) {
                             viewModel = viewModel,
                             ytDlpVersion = ytDlpVersion,
                             embedThumbnail = embedThumbnail,
-                            embedMetadata = embedMetadata,
                             useAria2c = useAria2c,
                             useWifiOnly = useWifiOnly,
                             maxConcurrent = maxConcurrent,
-                            defaultQuality = defaultQuality,
-                            downloadLocation = downloadLocation,
                             onOpenCookieManager = { showCookieDialog = true },
                             onCheckEngineUpdate = { showUpdateDialog = true }
                         )

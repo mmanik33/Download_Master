@@ -413,14 +413,14 @@ fun BrowserScreen(
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "Webpage Notice",
+                            text = "Page Reloaded",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = colors.textPrimary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = webErrorMessage ?: "Webpage rendering reset.",
+                            text = webErrorMessage ?: "This page was closed to save memory. Tap below to reload.",
                             fontSize = 13.sp,
                             color = colors.textSecondary,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -505,7 +505,7 @@ fun BrowserScreen(
                                             Log.e("BrowserScreen", "Cleanup error: ${e.message}")
                                         }
                                         webViewInstance = null
-                                        webErrorMessage = "The webpage renderer was reset to save memory. Tap below to reload."
+                                        webErrorMessage = "This page was closed to save memory. Tap below to reload."
                                         return true // Prevents host application crash
                                     }
                                 }

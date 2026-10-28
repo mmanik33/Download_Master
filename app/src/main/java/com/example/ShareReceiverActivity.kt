@@ -45,7 +45,7 @@ class ShareReceiverActivity : ComponentActivity() {
 
         val extractedUrl = extractSharedUrl(intent)
         if (extractedUrl == null) {
-            Toast.makeText(this, "No valid URL found", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No valid video link found", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -105,7 +105,7 @@ class ShareReceiverActivity : ComponentActivity() {
                             containerColor = colors.surface,
                             title = {
                                 Text(
-                                    text = "Unable to load media",
+                                    text = "Could not load video",
                                     fontWeight = FontWeight.Bold,
                                     color = colors.textPrimary
                                 )

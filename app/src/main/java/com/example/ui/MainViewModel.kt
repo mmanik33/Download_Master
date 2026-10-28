@@ -21,6 +21,7 @@ import com.example.service.DownloadForegroundService
 import com.example.ui.state.DownloadUiState
 import com.example.ui.state.EngineUpdateState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,7 +59,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_EMBED_METADATA = "key_embed_metadata"
         private const val KEY_USE_WIFI_ONLY = "key_use_wifi_only"
         private const val KEY_MAX_CONCURRENT = "key_max_concurrent"
-        private const val KEY_DEFAULT_QUALITY = "key_default_quality"
         private const val KEY_DOWNLOAD_PATH = "key_download_path"
         private const val KEY_THEME_MODE = "key_theme_mode" // "SYSTEM", "LIGHT", "DARK"
         private const val KEY_COLOR_PALETTE = "key_color_palette" // "DYNAMIC", "PURPLE", "BLUE", "GREEN", "ORANGE", "ROSE"
@@ -115,7 +115,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val useAria2c = MutableStateFlow(prefs.getBoolean(KEY_USE_ARIA2C, true))
     val useWifiOnly = MutableStateFlow(prefs.getBoolean(KEY_USE_WIFI_ONLY, false))
     val maxConcurrentDownloads = MutableStateFlow(prefs.getInt(KEY_MAX_CONCURRENT, 3))
-    val defaultQualityPreference = MutableStateFlow(prefs.getString(KEY_DEFAULT_QUALITY, "Ask Each Time") ?: "Ask Each Time")
     val downloadLocation = MutableStateFlow(
         repository.resolveValidDownloadLocationSetting(
             prefs.getString(KEY_DOWNLOAD_PATH, YtDlpRepository.DEFAULT_DOWNLOAD_LOCATION)
@@ -129,9 +128,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Download History
     private val _downloadHistory = sharedDownloadHistory
     val downloadHistory: StateFlow<List<DownloadHistoryItem>> = _downloadHistory.asStateFlow()
-
-    // History Search Query
-    val historySearchQuery = MutableStateFlow("")
 
     // Browser State
     val browserUrlInput = MutableStateFlow("")
@@ -185,7 +181,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             is DownloadForegroundService.DownloadEvent.Completed -> {
                                 val current = activeDownloads.value[event.id]
                                 if (current != null) {
-                                    addHistoryItem(current.mediaInfo, event.file, current.config, "Completed")
+                                    addHistoryItem(
+                                        media = current.mediaInfo,
+                                        file = event.file,
+                                        config = current.config,
+                                        status = "Completed",
+                                        elapsedTimeFormatted = event.elapsedTimeFormatted,
+                                        averageSpeedFormatted = event.averageSpeedFormatted
+                                    )
                                     activeDownloads.value = activeDownloads.value - event.id
                                 }
                             }
@@ -193,10 +196,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 activeDownloads.value = activeDownloads.value - event.id
                             }
                             is DownloadForegroundService.DownloadEvent.Cancelled -> {
-                                val current = activeDownloads.value[event.id]
-                                if (current != null) {
-                                    addHistoryItem(current.mediaInfo, null, current.config, "Cancelled")
-                                }
                                 activeDownloads.value = activeDownloads.value - event.id
                             }
                         }
@@ -250,28 +249,152 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var prefetchJob: kotlinx.coroutines.Job? = null
+    private var prefetchUrl: String? = null
+    private var prefetchDeferred: kotlinx.coroutines.Deferred<Result<MediaModel>>? = null
+
     fun onUrlInputChanged(newUrl: String) {
+        val previousUrl = _urlInput.value
         _urlInput.value = newUrl
+        val trimmed = newUrl.trim()
+        // If a valid http(s) URL was pasted directly into the text field (multi-char jump from empty/different text), pre-fetch immediately; otherwise debounce by 500ms
+        val isDirectPasteIntoField = kotlin.math.abs(trimmed.length - previousUrl.trim().length) > 6 && isValidHttpUrl(trimmed)
+        schedulePrefetch(trimmed, debounceMs = if (isDirectPasteIntoField) 0L else 500L)
     }
 
     fun pasteFromClipboard(clipboardText: String) {
         val clean = clipboardText.trim()
         if (clean.isNotBlank()) {
-            _urlInput.value = clean
-            parseMediaUrl(clean)
+            val extracted = extractHttpUrl(clean) ?: clean
+            _urlInput.value = extracted
+            schedulePrefetch(extracted, debounceMs = 0L)
+        }
+    }
+
+    private fun extractHttpUrl(text: String): String? {
+        return Regex("""https?://[^\s]+""", RegexOption.IGNORE_CASE).find(text)?.value
+    }
+
+    private fun isValidHttpUrl(url: String): Boolean {
+        val trimmed = url.trim()
+        if (!Regex("""^https?://[^\s/$.?#].[^\s]*$""", RegexOption.IGNORE_CASE).matches(trimmed)) {
+            return false
+        }
+        return try {
+            val parsed = java.net.URL(trimmed)
+            !parsed.host.isNullOrBlank() && parsed.host.contains(".")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun schedulePrefetch(rawUrl: String, debounceMs: Long) {
+        val candidate = rawUrl.trim()
+        if (candidate != prefetchUrl) {
+            prefetchJob?.cancel()
+            prefetchDeferred?.cancel()
+            prefetchJob = null
+            prefetchDeferred = null
+            prefetchUrl = null
+        }
+
+        if (!isValidHttpUrl(candidate)) {
+            return
+        }
+
+        // If already present in in-memory cache for this session, nothing to pre-fetch
+        if (repository.getMemoryCachedMetadata(candidate) != null) {
+            return
+        }
+
+        // Keep existing active pre-fetch for the same URL if already running
+        if (prefetchUrl == candidate && (prefetchDeferred?.isActive == true || (debounceMs > 0L && prefetchJob?.isActive == true))) {
+            return
+        }
+
+        prefetchJob?.cancel()
+        prefetchUrl = candidate
+        prefetchJob = viewModelScope.launch {
+            if (debounceMs > 0L) {
+                kotlinx.coroutines.delay(debounceMs)
+            }
+            if (repository.getMemoryCachedMetadata(candidate) != null) {
+                return@launch
+            }
+            val deferred = viewModelScope.async(Dispatchers.IO) {
+                repository.extractMetadata(candidate, forceRefresh = true)
+            }
+            prefetchDeferred = deferred
+            try {
+                deferred.await()
+            } catch (_: Exception) {
+            }
         }
     }
 
     fun parseMediaUrl(url: String = _urlInput.value) {
         val targetUrl = url.trim()
         if (targetUrl.isBlank()) {
-            _uiState.value = DownloadUiState.Error("Please enter a valid video or audio URL")
+            _uiState.value = DownloadUiState.Error("Please enter a valid video or audio link")
             return
         }
 
+        // 1. Lookup metadata cache (memory cache first, then 24-hour disk cache)
+        val cachedLookup = repository.getCachedMetadata(targetUrl)
+        if (cachedLookup != null) {
+            val config = buildCurrentConfig(cachedLookup.media.title, targetUrl)
+            _uiState.value = DownloadUiState.Ready(
+                mediaInfo = cachedLookup.media,
+                config = config
+            )
+
+            // On a disk-cache hit, refresh in the background and update the open sheet in place if the fresh result differs
+            if (cachedLookup.source == YtDlpRepository.CacheSource.DISK) {
+                viewModelScope.launch {
+                    val inFlight = if (prefetchUrl == targetUrl) prefetchDeferred else null
+                    val refreshResult = if (inFlight != null && inFlight.isActive) {
+                        try {
+                            inFlight.await()
+                        } catch (_: kotlinx.coroutines.CancellationException) {
+                            repository.extractMetadata(targetUrl, forceRefresh = true)
+                        }
+                    } else {
+                        prefetchJob?.cancel()
+                        repository.extractMetadata(targetUrl, forceRefresh = true)
+                    }
+
+                    refreshResult.onSuccess { freshMedia ->
+                        val currentState = _uiState.value
+                        if (currentState is DownloadUiState.Ready &&
+                            currentState.mediaInfo.webpageUrl == targetUrl &&
+                            freshMedia != currentState.mediaInfo
+                        ) {
+                            val updatedConfig = buildCurrentConfig(freshMedia.title, targetUrl)
+                            _uiState.value = DownloadUiState.Ready(
+                                mediaInfo = freshMedia,
+                                config = updatedConfig
+                            )
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        // 2. Cache miss (or expired TTL): show honest loading state and await in-flight pre-fetch or extract fresh
         viewModelScope.launch {
             _uiState.value = DownloadUiState.Parsing(targetUrl)
-            val result = repository.extractMetadata(targetUrl)
+            val inFlight = if (prefetchUrl == targetUrl) prefetchDeferred else null
+            val result = if (inFlight != null && inFlight.isActive) {
+                try {
+                    inFlight.await()
+                } catch (_: kotlinx.coroutines.CancellationException) {
+                    repository.extractMetadata(targetUrl, forceRefresh = true)
+                }
+            } else {
+                prefetchJob?.cancel()
+                repository.extractMetadata(targetUrl, forceRefresh = true)
+            }
             result.fold(
                 onSuccess = { media ->
                     val config = buildCurrentConfig(media.title, targetUrl)
@@ -282,14 +405,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 onFailure = { error ->
                     Log.e(TAG, "Failed to parse URL: $targetUrl", error)
-                    val rawMsg = error.localizedMessage ?: "Failed to retrieve media metadata."
+                    val rawMsg = error.localizedMessage ?: "Could not load video info."
                     val friendlyMsg = when {
                         rawMsg.contains("confirm you're not a bot", ignoreCase = true) || rawMsg.contains("bot", ignoreCase = true) ->
-                            "YouTube bot verification encountered. Please add cookies in Settings or update the yt-dlp engine."
+                            "YouTube asked to verify your account. Please sign in under Settings or update the downloader."
                         rawMsg.contains("Sign in", ignoreCase = true) ->
-                            "This content requires sign-in. Please provide cookies in Settings to proceed."
+                            "This video requires sign-in. Please sign in under Settings to continue."
                         rawMsg.contains("No supported JavaScript runtime", ignoreCase = true) ->
-                            "Extractor format fallback used. If this link fails, try updating the engine."
+                            "Some video formats could not be loaded. If this link fails, try updating the downloader."
                         else -> rawMsg
                     }
                     _uiState.value = DownloadUiState.Error(
@@ -308,7 +431,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         formatId: String? = null
     ) {
         if (activeDownloads.value.size >= maxConcurrentDownloads.value) {
-            android.widget.Toast.makeText(getApplication(), "Maximum concurrent downloads reached (${maxConcurrentDownloads.value}). Please wait.", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(getApplication(), "Too many downloads running at once (${maxConcurrentDownloads.value}). Please wait.", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -381,17 +504,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setMaxConcurrentDownloads(count: Int) {
         maxConcurrentDownloads.value = count
         prefs.edit().putInt(KEY_MAX_CONCURRENT, count).apply()
-    }
-
-    fun setDefaultQualityPreference(quality: String) {
-        defaultQualityPreference.value = quality
-        prefs.edit().putString(KEY_DEFAULT_QUALITY, quality).apply()
-    }
-
-    fun setDownloadLocation(path: String) {
-        val resolvedPath = repository.resolveValidDownloadLocationSetting(path)
-        downloadLocation.value = resolvedPath
-        prefs.edit().putString(KEY_DOWNLOAD_PATH, resolvedPath).apply()
     }
 
     fun getCookiesContent(): String = repository.getCookiesContent()
@@ -550,7 +662,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         media: MediaModel,
         file: File?,
         config: DownloadConfig,
-        status: String = "Completed"
+        status: String = "Completed",
+        elapsedTimeFormatted: String = "",
+        averageSpeedFormatted: String = ""
     ) {
         val newItem = DownloadHistoryItem(
             id = System.currentTimeMillis().toString(),
@@ -563,10 +677,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             status = status,
             resolution = if (config.isAudioOnly) config.audioFormat.name else config.videoQuality.label,
             wifiOnly = useWifiOnly.value,
-            isResumable = true
+            isResumable = true,
+            elapsedTimeFormatted = elapsedTimeFormatted,
+            averageSpeedFormatted = averageSpeedFormatted
         )
-        // If there's an existing item for this file (and file is not null), replace it. 
-        // For cancelled items, we might not have a file, just append.
         val updated = if (file != null) {
             listOf(newItem) + _downloadHistory.value.filter { it.localFilePath != file.absolutePath }
         } else {
@@ -604,6 +718,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     put("resolution", item.resolution)
                     put("wifiOnly", item.wifiOnly)
                     put("isResumable", item.isResumable)
+                    put("elapsedTimeFormatted", item.elapsedTimeFormatted)
+                    put("averageSpeedFormatted", item.averageSpeedFormatted)
                 }
                 jsonArray.put(obj)
             }
@@ -633,7 +749,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         status = obj.optString("status", "Completed"),
                         resolution = obj.optString("resolution", ""),
                         wifiOnly = obj.optBoolean("wifiOnly", false),
-                        isResumable = obj.optBoolean("isResumable", true)
+                        isResumable = obj.optBoolean("isResumable", true),
+                        elapsedTimeFormatted = obj.optString("elapsedTimeFormatted", ""),
+                        averageSpeedFormatted = obj.optString("averageSpeedFormatted", "")
                     )
                 )
             }

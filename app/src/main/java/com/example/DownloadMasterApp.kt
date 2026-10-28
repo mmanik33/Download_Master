@@ -29,12 +29,6 @@ class DownloadMasterApp : Application() {
         lateinit var instance: DownloadMasterApp
             private set
 
-        private val _isInitialized = MutableStateFlow(false)
-        val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
-
-        private val _initError = MutableStateFlow<String?>(null)
-        val initError: StateFlow<String?> = _initError.asStateFlow()
-
         private val _ytDlpVersion = MutableStateFlow<String>("Loading...")
         val ytDlpVersion: StateFlow<String> = _ytDlpVersion.asStateFlow()
     }
@@ -106,14 +100,12 @@ class DownloadMasterApp : Application() {
                 }
 
                 val version = try {
-                    YoutubeDL.getInstance().version(this@DownloadMasterApp) ?: "Embedded yt-dlp"
+                    YoutubeDL.getInstance().version(this@DownloadMasterApp) ?: "Built-in"
                 } catch (e: Exception) {
-                    "Embedded yt-dlp"
+                    "Built-in"
                 }
 
                 _ytDlpVersion.value = version
-                _isInitialized.value = true
-                _initError.value = null
                 Log.i(TAG, "YoutubeDL engine successfully initialized. Version: $version")
 
                 // Automatically check & update engine in background upon startup
@@ -130,12 +122,8 @@ class DownloadMasterApp : Application() {
                 }
             } catch (e: YoutubeDLException) {
                 Log.e(TAG, "Failed to initialize YoutubeDL engine", e)
-                _initError.value = "YoutubeDL initialization error: ${e.message}"
-                _isInitialized.value = false
             } catch (e: Throwable) {
                 Log.e(TAG, "Unexpected error during YoutubeDL initialization", e)
-                _initError.value = "Initialization error: ${e.localizedMessage}"
-                _isInitialized.value = false
             }
         }
     }
@@ -143,13 +131,13 @@ class DownloadMasterApp : Application() {
     fun updateEngine(onResult: (Boolean, String) -> Unit) {
         applicationScope.launch {
             try {
-                val status = YoutubeDL.getInstance().updateYoutubeDL(this@DownloadMasterApp, YoutubeDL.UpdateChannel.STABLE)
+                YoutubeDL.getInstance().updateYoutubeDL(this@DownloadMasterApp, YoutubeDL.UpdateChannel.STABLE)
                 val newVer = YoutubeDL.getInstance().version(this@DownloadMasterApp) ?: "Updated"
                 _ytDlpVersion.value = newVer
-                onResult(true, "Updated successfully to $newVer (Status: $status)")
+                onResult(true, "Updated to version $newVer")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to update yt-dlp", e)
-                onResult(false, "Update failed: ${e.message}")
+                onResult(false, "Could not update: ${e.message}")
             }
         }
     }
